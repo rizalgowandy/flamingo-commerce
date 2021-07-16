@@ -1,14 +1,59 @@
 # Changelog
 ## v3.5.0 [upcoming]
 **cart**
+* Add convenience function to clone carts
+* DefaultCartBehaviour now returns real cart clones to prevent data races on cart fields 
 * API
   * **Breaking**: Update `DELETE /api/v1/cart` to actually clean the whole cart not only removing the cart items (introduces new route for the previous behaviour, see below)
   * Add new endpoint `DELETE /api/v1/cart/deliveries/items` to be able to remove all cart items from all deliveries but keeping delivery info and other cart data untouched
-* Added new method `SumShippingGrossWithDiscounts` to the cart domain which returns gross shipping costs for the cart.
-* GraphQL: Added new method `sumShippingGrossWithDiscounts` to the `Commerce_DecoratedCart` type.
+* Add new method `SumShippingGrossWithDiscounts` to the cart domain which returns gross shipping costs for the cart 
+* When using the `ItemSplitter` to split items in items with single qty (`SplitInSingleQtyItems`) the split discounts are reversed to make splitting the row total stable.
+* **Breaking**: `SumTotalTaxAmount` now takes taxes on shipping costs into account
+* **Breaking**: Delivery discount sum calculations `SumTotalDiscountAmount`, `SumNonItemRelatedDiscountAmount`, `SumItemRelatedDiscountAmount` now take discount on shipping costs into account
+  * Old calculation is now in `SumSubTotalDiscountAmount`.
+* `CartService`
+  * Add `UpdateAdditionalData` to be able to set additional data to cart
+  * Add `UpdateDeliveryAdditionalData` to be able to set additional data to the delivery info
+  * Introduce new [interface](cart/application/service.go) to be able to easier mock the whole `CartService`
+  * Add auto generated mockery mock for the `CartService`
+  * Add new field `PriceGross` of `shippingItem` to directly get the shipping cost incl tax (must be filled by cart adapter)
+* GraphQL: 
+  * Add new method `sumShippingGrossWithDiscounts` to the `Commerce_DecoratedCart` type
+  * Add new field `sumShippingGross` to the `Commerce_DecoratedCart` type
+  * Add new field `priceGross` to the `Commerce_Cart_ShippingItem` type
+  * Add new mutation `Commerce_Cart_UpdateAdditionalData`
+  * Add new mutation `Commerce_Cart_UpdateDeliveriesAdditionalData`
+  * Add new field `customAttributes` to the `Commerce_CartAdditionalData` type
+  * Add new field `additionalData` to the `Commerce_CartDeliveryInfo` type
+  * Add new type `Commerce_Cart_CustomAttributes` with method for getting key/value pairs
+  * **Breaking**: Make naming convention consistent in graphql schema `Commerce_Cart_*`
+  * **Breaking**: Remove the fields `getAdditionalData, additionalDataKeys, additionalDeliveryInfoKeys` from the `Commerce_CartDeliveryInfo` type
+  * **Breaking**: `Commerce_Cart_UpdateDeliveryShippingOptions` mutation responded with slice of `Commerce_Cart_DeliveryAddressForm` which was incorrect as we don't process any form data within the mutation. It responds now rightly only with `processed` state.
 
 **checkout**
 * Introducing Flamingo events on final states of the place order process
+* Introduce a max ttl for the checkout state machine to avoid polluting the redis with stale checkout processes, defaults to 2h
+* API
+  * In case of an invalid cart during place order process we now expose the cart validation result, affected endpoints:
+    ```
+    GET /api/v1/checkout/placeorder
+    POST /api/v1/checkout/placeorder/refresh
+    POST /api/v1/checkout/placeorder/refresh-blocking
+    ```
+
+**customer**
+* Add mockery mocks for both `Customer` / `CustomerIdentityService` for easier testing
+* Add `State` field to customer address to be closer to cart address type, expose via GraphQL
+
+**price**
+* When marshalling `domain.Price` to JSON the amount is rounded.
+
+**product**
+* Enhance the `PriceContext` to allow potential delivery specific pricing
+* GraphQL:
+  * **Breaking**: Change `activeBase` of `Commerce_Product_PriceInfo` from `Float` to `Commerce_Price`
+  * Add `availablePrices` to the `Commerce_Product` interface to display potential pricing options in the frontend
+  * Add `context` to the `Commerce_Product_PriceInfo` model to be able to differ between prices
 
 ## v3.4.0
 **cart**

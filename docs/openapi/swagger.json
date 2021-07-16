@@ -1557,6 +1557,9 @@
                         "$ref": "#/definitions/cart.AppliedDiscount"
                     }
                 },
+                "PriceGross": {
+                    "$ref": "#/definitions/domain.Price"
+                },
                 "PriceNet": {
                     "$ref": "#/definitions/domain.Price"
                 },
@@ -1692,6 +1695,9 @@
             "properties": {
                 "Cart": {
                     "$ref": "#/definitions/cart.Cart"
+                },
+                "CartValidationResult": {
+                    "$ref": "#/definitions/validation.Result"
                 },
                 "FailedReason": {
                     "type": "string"
@@ -1952,6 +1958,9 @@
                 "CustomerGroup": {
                     "type": "string"
                 },
+                "DeliveryCode": {
+                    "type": "string"
+                },
                 "Locale": {
                     "type": "string"
                 }
@@ -2053,7 +2062,7 @@
                     }
                 },
                 "LoyaltyEarnings": {
-                    "description": "LoyaltyEarnings jolds optional infos about potential loyalty earnings",
+                    "description": "LoyaltyEarnings holds optional infos about potential loyalty earnings",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/domain.LoyaltyEarningInfo"

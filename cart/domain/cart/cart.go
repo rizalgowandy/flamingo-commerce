@@ -1,6 +1,7 @@
 package cart
 
 import (
+	"bytes"
 	"encoding/gob"
 	"fmt"
 	"math/big"
@@ -172,6 +173,23 @@ func (c Cart) GetMainShippingEMail() string {
 	}
 
 	return ""
+}
+
+// Clone the current cart
+func (c Cart) Clone() (Cart, error) {
+	cloned := Cart{}
+
+	b := new(bytes.Buffer)
+	err := gob.NewEncoder(b).Encode(c)
+	if err != nil {
+		return Cart{}, err
+	}
+	err = gob.NewDecoder(b).Decode(&cloned)
+	if err != nil {
+		return Cart{}, err
+	}
+
+	return cloned, nil
 }
 
 // GetContactMail returns the contact mail from the shipping address with fall back to the billing address
@@ -386,6 +404,19 @@ func (c Cart) SumShippingNetWithDiscounts() domain.Price {
 	for _, del := range c.Deliveries {
 		discount, _ := del.ShippingItem.AppliedDiscounts.Sum()
 		prices = append(prices, del.ShippingItem.PriceNet.ForceAdd(discount))
+	}
+
+	price, _ := domain.SumAll(prices...)
+
+	return price
+}
+
+// SumShippingGross returns gross sum price of deliveries ShippingItems
+func (c Cart) SumShippingGross() domain.Price {
+	prices := make([]domain.Price, 0, len(c.Deliveries))
+
+	for _, del := range c.Deliveries {
+		prices = append(prices, del.ShippingItem.PriceGross)
 	}
 
 	price, _ := domain.SumAll(prices...)

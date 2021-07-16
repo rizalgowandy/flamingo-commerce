@@ -1574,6 +1574,9 @@ var doc = `{
                         "$ref": "#/definitions/cart.AppliedDiscount"
                     }
                 },
+                "PriceGross": {
+                    "$ref": "#/definitions/domain.Price"
+                },
                 "PriceNet": {
                     "$ref": "#/definitions/domain.Price"
                 },
@@ -1709,6 +1712,9 @@ var doc = `{
             "properties": {
                 "Cart": {
                     "$ref": "#/definitions/cart.Cart"
+                },
+                "CartValidationResult": {
+                    "$ref": "#/definitions/validation.Result"
                 },
                 "FailedReason": {
                     "type": "string"
@@ -1969,6 +1975,9 @@ var doc = `{
                 "CustomerGroup": {
                     "type": "string"
                 },
+                "DeliveryCode": {
+                    "type": "string"
+                },
                 "Locale": {
                     "type": "string"
                 }
@@ -2070,7 +2079,7 @@ var doc = `{
                     }
                 },
                 "LoyaltyEarnings": {
-                    "description": "LoyaltyEarnings jolds optional infos about potential loyalty earnings",
+                    "description": "LoyaltyEarnings holds optional infos about potential loyalty earnings",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/domain.LoyaltyEarningInfo"
