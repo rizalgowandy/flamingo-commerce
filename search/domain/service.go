@@ -31,6 +31,14 @@ type (
 		Suggestion []Suggestion
 		Facets     FacetCollection
 		Promotions []Promotion
+		Actions    []Action
+	}
+
+	// Action might be considered on the frontend to be taken depending on search results
+	Action struct {
+		Type                 string
+		Content              string
+		AdditionalAttributes map[string]interface{}
 	}
 
 	// SearchMeta data
@@ -55,10 +63,8 @@ type (
 		// SelectedDesc true if sorting by this field is active
 		SelectedDesc bool
 		// Asc - represents the field that is used to trigger ascending search.
-		// Deprecated: use "Field" and "SelectedAsc" instead to set which field should be sortable
 		Asc string
 		// Desc - represents the field that is used to trigger descending search.
-		// Deprecated: use "Field" and "SelectedDesc" instead to set which field should be sortable
 		Desc string
 	}
 
@@ -84,7 +90,7 @@ type (
 
 	// Facet provided by the search backend
 	Facet struct {
-		Type     string
+		Type     FacetType
 		Name     string
 		Label    string
 		Items    []*FacetItem
@@ -173,8 +179,8 @@ func (fc FacetCollection) Order() []string {
 // Facet types
 const (
 	ListFacet  FacetType = "ListFacet"
-	TreeFacet            = "TreeFacet"
-	RangeFacet           = "RangeFacet"
+	TreeFacet  FacetType = "TreeFacet"
+	RangeFacet FacetType = "RangeFacet"
 )
 
 var (

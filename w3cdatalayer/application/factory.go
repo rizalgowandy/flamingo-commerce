@@ -5,6 +5,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 	"flamingo.me/flamingo/v3/core/auth"
 	"flamingo.me/flamingo/v3/framework/flamingo"
 	"flamingo.me/flamingo/v3/framework/web"
-	"github.com/pkg/errors"
 	"go.opencensus.io/tag"
 
 	"flamingo.me/flamingo-commerce/v3/cart/domain/decorator"
@@ -128,7 +128,7 @@ func (s Factory) BuildForCurrentRequest(ctx context.Context, request *web.Reques
 
 	baseURL, err := s.router.Absolute(request, request.Request().URL.Path, nil)
 	if err != nil {
-		s.logger.Warn(errors.Wrap(err, "cannot build absolute url"))
+		s.logger.Warn(fmt.Errorf("cannot build absolute url: %w", err))
 		baseURL = new(url.URL)
 	}
 	layer.Page = &domain.Page{
@@ -215,17 +215,17 @@ func (s Factory) BuildCartData(cart decorator.DecoratedCart) *domain.Cart {
 	cartData := domain.Cart{
 		CartID: cart.Cart.ID,
 		Price: &domain.CartPrice{
-			Currency:       cart.Cart.GrandTotal().Currency(),
-			BasePrice:      cart.Cart.SubTotalNet().FloatAmount(),
-			CartTotal:      cart.Cart.GrandTotal().FloatAmount(),
-			Shipping:       cart.Cart.SumShippingNet().FloatAmount(),
+			Currency:       cart.Cart.GrandTotal.Currency(),
+			BasePrice:      cart.Cart.SubTotalNet.FloatAmount(),
+			CartTotal:      cart.Cart.GrandTotal.FloatAmount(),
+			Shipping:       cart.Cart.ShippingNet.FloatAmount(),
 			ShippingMethod: strings.Join(cart.Cart.AllShippingTitles(), "/"),
-			PriceWithTax:   cart.Cart.GrandTotal().FloatAmount(),
+			PriceWithTax:   cart.Cart.GrandTotal.FloatAmount(),
 		},
 		Attributes: make(map[string]interface{}),
 	}
 	for _, item := range cart.GetAllDecoratedItems() {
-		itemData := s.buildCartItem(item, cart.Cart.GrandTotal().Currency())
+		itemData := s.buildCartItem(item, cart.Cart.GrandTotal.Currency())
 		cartData.Item = append(cartData.Item, itemData)
 	}
 	return &cartData
@@ -246,17 +246,17 @@ func (s Factory) BuildTransactionData(ctx context.Context, cart decorator.Decora
 	transactionData := domain.Transaction{
 		TransactionID: orderID,
 		Price: &domain.TransactionPrice{
-			Currency:         cart.Cart.GrandTotal().Currency(),
-			BasePrice:        cart.Cart.GrandTotal().FloatAmount(),
-			TransactionTotal: cart.Cart.GrandTotal().FloatAmount(),
-			Shipping:         cart.Cart.SumShippingNet().FloatAmount(),
+			Currency:         cart.Cart.GrandTotal.Currency(),
+			BasePrice:        cart.Cart.GrandTotal.FloatAmount(),
+			TransactionTotal: cart.Cart.GrandTotal.FloatAmount(),
+			Shipping:         cart.Cart.ShippingNet.FloatAmount(),
 			ShippingMethod:   strings.Join(cart.Cart.AllShippingTitles(), "/"),
 		},
 		Profile:    profile,
 		Attributes: make(map[string]interface{}),
 	}
 	for _, item := range decoratedItems {
-		itemData := s.buildCartItem(item, cart.Cart.GrandTotal().Currency())
+		itemData := s.buildCartItem(item, cart.Cart.GrandTotal.Currency())
 		transactionData.Item = append(transactionData.Item, itemData)
 	}
 	return &transactionData

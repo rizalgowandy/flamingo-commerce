@@ -1,16 +1,16 @@
 package application
 
-//go:generate go run github.com/vektra/mockery/v2 --name Service --case snake --structname CartService
-
 import (
 	"context"
+	"errors"
+
+	"flamingo.me/flamingo/v3/framework/web"
 
 	cartDomain "flamingo.me/flamingo-commerce/v3/cart/domain/cart"
 	"flamingo.me/flamingo-commerce/v3/cart/domain/decorator"
 	"flamingo.me/flamingo-commerce/v3/cart/domain/placeorder"
 	"flamingo.me/flamingo-commerce/v3/cart/domain/validation"
 	productDomain "flamingo.me/flamingo-commerce/v3/product/domain"
-	"flamingo.me/flamingo/v3/framework/web"
 )
 
 type (
@@ -26,12 +26,14 @@ type (
 		UpdateItemQty(ctx context.Context, session *web.Session, itemID string, deliveryCode string, qty int) error
 		UpdateItemSourceID(ctx context.Context, session *web.Session, itemID string, sourceID string) error
 		UpdateItems(ctx context.Context, session *web.Session, updateCommands []cartDomain.ItemUpdateCommand) error
+		UpdateItemBundleConfig(ctx context.Context, session *web.Session, updateCommand cartDomain.ItemUpdateCommand) error
 		DeleteItem(ctx context.Context, session *web.Session, itemID string, deliveryCode string) error
 		DeleteAllItems(ctx context.Context, session *web.Session) error
 		CompleteCurrentCart(ctx context.Context) (*cartDomain.Cart, error)
 		RestoreCart(ctx context.Context, cart *cartDomain.Cart) (*cartDomain.Cart, error)
 		Clean(ctx context.Context, session *web.Session) error
 		DeleteDelivery(ctx context.Context, session *web.Session, deliveryCode string) (*cartDomain.Cart, error)
+		// Deprecated: build your own add request
 		BuildAddRequest(ctx context.Context, marketplaceCode string, variantMarketplaceCode string, qty int, additionalData map[string]string) cartDomain.AddRequest
 		AddProduct(ctx context.Context, session *web.Session, deliveryCode string, addRequest cartDomain.AddRequest) (productDomain.BasicProduct, error)
 		CreateInitialDeliveryIfNotPresent(ctx context.Context, session *web.Session, deliveryCode string) (*cartDomain.Cart, error)
@@ -53,4 +55,15 @@ type (
 		UpdateAdditionalData(ctx context.Context, session *web.Session, additionalData map[string]string) (*cartDomain.Cart, error)
 		UpdateDeliveryAdditionalData(ctx context.Context, session *web.Session, deliveryCode string, additionalData map[string]string) (*cartDomain.Cart, error)
 	}
+)
+
+var (
+	// ErrNoBundleConfigurationGiven returned when bundle configuration is not provided
+	ErrNoBundleConfigurationGiven = errors.New("no bundle configuration given for configurable product")
+
+	// ErrNoVariantForConfigurable returned when type configurable with active variant do not have variant selected
+	ErrNoVariantForConfigurable = errors.New("no variant given for configurable product")
+
+	// ErrVariantDoNotExist returned when selected variant do not exist
+	ErrVariantDoNotExist = errors.New("product has not the given variant")
 )

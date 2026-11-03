@@ -2,13 +2,14 @@ package logger_test
 
 import (
 	"context"
+	"testing"
+
 	"flamingo.me/flamingo-commerce/v3/cart/domain/cart"
 	"flamingo.me/flamingo-commerce/v3/cart/domain/placeorder"
 	logger "flamingo.me/flamingo-commerce/v3/cart/infrastructure/placeorder"
 	"flamingo.me/flamingo-commerce/v3/price/domain"
 	"flamingo.me/flamingo/v3/framework/flamingo"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 type (
@@ -129,18 +130,18 @@ func TestPlaceOrderLoggerAdapter_PlaceGuestCart(t *testing.T) {
 						SourceID:               "",
 						Qty:                    1,
 						AdditionalData:         nil,
-						SinglePriceGross:       domain.NewFromInt(1190, 100, "€"),
-						SinglePriceNet:         domain.NewFromInt(1000, 100, "€"),
-						RowPriceGross:          domain.NewFromInt(2380, 100, "€"),
-						RowPriceNet:            domain.NewFromInt(2000, 100, "€"),
+						SinglePriceGross:       domain.NewFromInt(1190, 100, "EUR"),
+						SinglePriceNet:         domain.NewFromInt(1000, 100, "EUR"),
+						RowPriceGross:          domain.NewFromInt(2380, 100, "EUR"),
+						RowPriceNet:            domain.NewFromInt(2000, 100, "EUR"),
 						RowTaxes:               nil,
 						AppliedDiscounts:       nil,
 					},
 				},
 				ShippingItem: cart.ShippingItem{
 					Title:            "Express",
-					PriceNet:         domain.NewFromInt(1000, 100, "€"),
-					TaxAmount:        domain.NewFromInt(190, 100, "€"),
+					PriceNet:         domain.NewFromInt(1000, 100, "EUR"),
+					TaxAmount:        domain.NewFromInt(190, 100, "EUR"),
 					AppliedDiscounts: nil,
 				},
 			},
@@ -168,10 +169,10 @@ func TestPlaceOrderLoggerAdapter_PlaceGuestCart(t *testing.T) {
 						SourceID:               "",
 						Qty:                    1,
 						AdditionalData:         nil,
-						SinglePriceGross:       domain.NewFromInt(1190, 100, "€"),
-						SinglePriceNet:         domain.NewFromInt(1000, 100, "€"),
-						RowPriceGross:          domain.NewFromInt(2380, 100, "€"),
-						RowPriceNet:            domain.NewFromInt(2000, 100, "€"),
+						SinglePriceGross:       domain.NewFromInt(1190, 100, "EUR"),
+						SinglePriceNet:         domain.NewFromInt(1000, 100, "EUR"),
+						RowPriceGross:          domain.NewFromInt(2380, 100, "EUR"),
+						RowPriceNet:            domain.NewFromInt(2000, 100, "EUR"),
 						RowTaxes:               nil,
 						AppliedDiscounts:       nil,
 					},
@@ -184,10 +185,10 @@ func TestPlaceOrderLoggerAdapter_PlaceGuestCart(t *testing.T) {
 						SourceID:               "",
 						Qty:                    1,
 						AdditionalData:         nil,
-						SinglePriceGross:       domain.NewFromInt(1190, 100, "€"),
-						SinglePriceNet:         domain.NewFromInt(1000, 100, "€"),
-						RowPriceGross:          domain.NewFromInt(2380, 100, "€"),
-						RowPriceNet:            domain.NewFromInt(2000, 100, "€"),
+						SinglePriceGross:       domain.NewFromInt(1190, 100, "EUR"),
+						SinglePriceNet:         domain.NewFromInt(1000, 100, "EUR"),
+						RowPriceGross:          domain.NewFromInt(2380, 100, "EUR"),
+						RowPriceNet:            domain.NewFromInt(2000, 100, "EUR"),
 						RowTaxes:               nil,
 						AppliedDiscounts:       nil,
 					},
@@ -210,8 +211,8 @@ func TestPlaceOrderLoggerAdapter_PlaceGuestCart(t *testing.T) {
 			placeorder.Transaction{
 				Method:            "testmethod",
 				Status:            placeorder.PaymentStatusOpen,
-				ValuedAmountPayed: exampleCart.GrandTotal(),
-				AmountPayed:       exampleCart.GrandTotal(),
+				ValuedAmountPayed: exampleCart.GrandTotal,
+				AmountPayed:       exampleCart.GrandTotal,
 				TransactionID:     "t1",
 			},
 		},

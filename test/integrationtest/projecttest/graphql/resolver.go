@@ -56,6 +56,7 @@ func (r *rootResolver) Inject(
 	rootResolverCommerce_Search_Meta *rootResolverCommerce_Search_Meta,
 	rootResolverMutation *rootResolverMutation,
 	rootResolverQuery *rootResolverQuery,
+
 ) {
 	r.rootResolverCommerce_Cart_AdditionalData = rootResolverCommerce_Cart_AdditionalData
 	r.rootResolverCommerce_Cart_Cart = rootResolverCommerce_Cart_Cart
@@ -67,6 +68,11 @@ func (r *rootResolver) Inject(
 	r.rootResolverCommerce_Search_Meta = rootResolverCommerce_Search_Meta
 	r.rootResolverMutation = rootResolverMutation
 	r.rootResolverQuery = rootResolverQuery
+
+}
+
+func (r *rootResolver) directives() DirectiveRoot {
+	return DirectiveRoot{}
 }
 
 func (r *rootResolver) Commerce_Cart_AdditionalData() Commerce_Cart_AdditionalDataResolver {
@@ -214,11 +220,13 @@ func (r *rootResolverCommerce_Search_Meta) SortOptions(ctx context.Context, obj 
 
 type rootResolverMutation struct {
 	resolveFlamingo                                   func(ctx context.Context) (*string, error)
-	resolveCommerceCartAddToCart                      func(ctx context.Context, marketplaceCode string, qty int, deliveryCode string) (*dto.DecoratedCart, error)
+	resolveCommerceCartAddToCart                      func(ctx context.Context, addToCartInput dto.AddToCart) (*dto.DecoratedCart, error)
 	resolveCommerceCartDeleteCartDelivery             func(ctx context.Context, deliveryCode string) (*dto.DecoratedCart, error)
 	resolveCommerceCartDeleteItem                     func(ctx context.Context, itemID string, deliveryCode string) (*dto.DecoratedCart, error)
 	resolveCommerceCartUpdateItemQty                  func(ctx context.Context, itemID string, deliveryCode string, qty int) (*dto.DecoratedCart, error)
+	resolveCommerceCartUpdateItemBundleConfig         func(ctx context.Context, itemID string, bundleConfig []*dto.ChoiceConfiguration) (*dto.DecoratedCart, error)
 	resolveCommerceCartUpdateBillingAddress           func(ctx context.Context, addressForm *forms.AddressForm) (*dto.BillingAddressForm, error)
+	resolveCommerceCartUpdatePersonalData             func(ctx context.Context, personalData *forms.DefaultPersonalDataForm) (*dto.PersonalDataForm, error)
 	resolveCommerceCartUpdateSelectedPayment          func(ctx context.Context, gateway string, method string) (*dto.SelectedPaymentResult, error)
 	resolveCommerceCartApplyCouponCodeOrGiftCard      func(ctx context.Context, code string) (*dto.DecoratedCart, error)
 	resolveCommerceCartRemoveGiftCard                 func(ctx context.Context, giftCardCode string) (*dto.DecoratedCart, error)
@@ -229,7 +237,7 @@ type rootResolverMutation struct {
 	resolveCommerceCartUpdateAdditionalData           func(ctx context.Context, additionalData []*dto.KeyValue) (*dto.DecoratedCart, error)
 	resolveCommerceCartUpdateDeliveriesAdditionalData func(ctx context.Context, data []*dto.DeliveryAdditionalData) (*dto.DecoratedCart, error)
 	resolveCommerceCheckoutStartPlaceOrder            func(ctx context.Context, returnURL string) (*dto1.StartPlaceOrderResult, error)
-	resolveCommerceCheckoutCancelPlaceOrder           func(ctx context.Context) (bool, error)
+	resolveCommerceCheckoutCancelPlaceOrder           func(ctx context.Context, reason *dto1.PaymentCancellationReason) (bool, error)
 	resolveCommerceCheckoutClearPlaceOrder            func(ctx context.Context) (bool, error)
 	resolveCommerceCheckoutRefreshPlaceOrder          func(ctx context.Context) (*dto1.PlaceOrderContext, error)
 	resolveCommerceCheckoutRefreshPlaceOrderBlocking  func(ctx context.Context) (*dto1.PlaceOrderContext, error)
@@ -241,7 +249,9 @@ func (r *rootResolverMutation) Inject(
 	mutationCommerceCartDeleteCartDelivery *graphql1.CommerceCartMutationResolver,
 	mutationCommerceCartDeleteItem *graphql1.CommerceCartMutationResolver,
 	mutationCommerceCartUpdateItemQty *graphql1.CommerceCartMutationResolver,
+	mutationCommerceCartUpdateItemBundleConfig *graphql1.CommerceCartMutationResolver,
 	mutationCommerceCartUpdateBillingAddress *graphql1.CommerceCartMutationResolver,
+	mutationCommerceCartUpdatePersonalData *graphql1.CommerceCartMutationResolver,
 	mutationCommerceCartUpdateSelectedPayment *graphql1.CommerceCartMutationResolver,
 	mutationCommerceCartApplyCouponCodeOrGiftCard *graphql1.CommerceCartMutationResolver,
 	mutationCommerceCartRemoveGiftCard *graphql1.CommerceCartMutationResolver,
@@ -262,7 +272,9 @@ func (r *rootResolverMutation) Inject(
 	r.resolveCommerceCartDeleteCartDelivery = mutationCommerceCartDeleteCartDelivery.CommerceDeleteCartDelivery
 	r.resolveCommerceCartDeleteItem = mutationCommerceCartDeleteItem.CommerceDeleteItem
 	r.resolveCommerceCartUpdateItemQty = mutationCommerceCartUpdateItemQty.CommerceUpdateItemQty
+	r.resolveCommerceCartUpdateItemBundleConfig = mutationCommerceCartUpdateItemBundleConfig.CommerceUpdateItemBundleConfig
 	r.resolveCommerceCartUpdateBillingAddress = mutationCommerceCartUpdateBillingAddress.CommerceCartUpdateBillingAddress
+	r.resolveCommerceCartUpdatePersonalData = mutationCommerceCartUpdatePersonalData.CommerceCartUpdatePersonalData
 	r.resolveCommerceCartUpdateSelectedPayment = mutationCommerceCartUpdateSelectedPayment.CommerceCartUpdateSelectedPayment
 	r.resolveCommerceCartApplyCouponCodeOrGiftCard = mutationCommerceCartApplyCouponCodeOrGiftCard.CommerceCartApplyCouponCodeOrGiftCard
 	r.resolveCommerceCartRemoveGiftCard = mutationCommerceCartRemoveGiftCard.CommerceCartRemoveGiftCard
@@ -282,8 +294,8 @@ func (r *rootResolverMutation) Inject(
 func (r *rootResolverMutation) Flamingo(ctx context.Context) (*string, error) {
 	return r.resolveFlamingo(ctx)
 }
-func (r *rootResolverMutation) CommerceCartAddToCart(ctx context.Context, marketplaceCode string, qty int, deliveryCode string) (*dto.DecoratedCart, error) {
-	return r.resolveCommerceCartAddToCart(ctx, marketplaceCode, qty, deliveryCode)
+func (r *rootResolverMutation) CommerceCartAddToCart(ctx context.Context, addToCartInput dto.AddToCart) (*dto.DecoratedCart, error) {
+	return r.resolveCommerceCartAddToCart(ctx, addToCartInput)
 }
 func (r *rootResolverMutation) CommerceCartDeleteCartDelivery(ctx context.Context, deliveryCode string) (*dto.DecoratedCart, error) {
 	return r.resolveCommerceCartDeleteCartDelivery(ctx, deliveryCode)
@@ -294,8 +306,14 @@ func (r *rootResolverMutation) CommerceCartDeleteItem(ctx context.Context, itemI
 func (r *rootResolverMutation) CommerceCartUpdateItemQty(ctx context.Context, itemID string, deliveryCode string, qty int) (*dto.DecoratedCart, error) {
 	return r.resolveCommerceCartUpdateItemQty(ctx, itemID, deliveryCode, qty)
 }
+func (r *rootResolverMutation) CommerceCartUpdateItemBundleConfig(ctx context.Context, itemID string, bundleConfig []*dto.ChoiceConfiguration) (*dto.DecoratedCart, error) {
+	return r.resolveCommerceCartUpdateItemBundleConfig(ctx, itemID, bundleConfig)
+}
 func (r *rootResolverMutation) CommerceCartUpdateBillingAddress(ctx context.Context, addressForm *forms.AddressForm) (*dto.BillingAddressForm, error) {
 	return r.resolveCommerceCartUpdateBillingAddress(ctx, addressForm)
+}
+func (r *rootResolverMutation) CommerceCartUpdatePersonalData(ctx context.Context, personalData *forms.DefaultPersonalDataForm) (*dto.PersonalDataForm, error) {
+	return r.resolveCommerceCartUpdatePersonalData(ctx, personalData)
 }
 func (r *rootResolverMutation) CommerceCartUpdateSelectedPayment(ctx context.Context, gateway string, method string) (*dto.SelectedPaymentResult, error) {
 	return r.resolveCommerceCartUpdateSelectedPayment(ctx, gateway, method)
@@ -327,8 +345,8 @@ func (r *rootResolverMutation) CommerceCartUpdateDeliveriesAdditionalData(ctx co
 func (r *rootResolverMutation) CommerceCheckoutStartPlaceOrder(ctx context.Context, returnURL string) (*dto1.StartPlaceOrderResult, error) {
 	return r.resolveCommerceCheckoutStartPlaceOrder(ctx, returnURL)
 }
-func (r *rootResolverMutation) CommerceCheckoutCancelPlaceOrder(ctx context.Context) (bool, error) {
-	return r.resolveCommerceCheckoutCancelPlaceOrder(ctx)
+func (r *rootResolverMutation) CommerceCheckoutCancelPlaceOrder(ctx context.Context, reason *dto1.PaymentCancellationReason) (bool, error) {
+	return r.resolveCommerceCheckoutCancelPlaceOrder(ctx, reason)
 }
 func (r *rootResolverMutation) CommerceCheckoutClearPlaceOrder(ctx context.Context) (bool, error) {
 	return r.resolveCommerceCheckoutClearPlaceOrder(ctx)
@@ -342,7 +360,7 @@ func (r *rootResolverMutation) CommerceCheckoutRefreshPlaceOrderBlocking(ctx con
 
 type rootResolverQuery struct {
 	resolveFlamingo                         func(ctx context.Context) (*string, error)
-	resolveCommerceProduct                  func(ctx context.Context, marketPlaceCode string, variantMarketPlaceCode *string) (graphqlproductdto.Product, error)
+	resolveCommerceProduct                  func(ctx context.Context, marketPlaceCode string, variantMarketPlaceCode *string, bundleConfiguration []*graphqlproductdto.ChoiceConfiguration) (graphqlproductdto.Product, error)
 	resolveCommerceProductSearch            func(ctx context.Context, searchRequest searchdto.CommerceSearchRequest) (*graphql2.SearchResultDTO, error)
 	resolveCommerceCustomerStatus           func(ctx context.Context) (*dtocustomer.CustomerStatusResult, error)
 	resolveCommerceCustomer                 func(ctx context.Context) (*dtocustomer.CustomerResult, error)
@@ -386,8 +404,8 @@ func (r *rootResolverQuery) Inject(
 func (r *rootResolverQuery) Flamingo(ctx context.Context) (*string, error) {
 	return r.resolveFlamingo(ctx)
 }
-func (r *rootResolverQuery) CommerceProduct(ctx context.Context, marketPlaceCode string, variantMarketPlaceCode *string) (graphqlproductdto.Product, error) {
-	return r.resolveCommerceProduct(ctx, marketPlaceCode, variantMarketPlaceCode)
+func (r *rootResolverQuery) CommerceProduct(ctx context.Context, marketPlaceCode string, variantMarketPlaceCode *string, bundleConfiguration []*graphqlproductdto.ChoiceConfiguration) (graphqlproductdto.Product, error) {
+	return r.resolveCommerceProduct(ctx, marketPlaceCode, variantMarketPlaceCode, bundleConfiguration)
 }
 func (r *rootResolverQuery) CommerceProductSearch(ctx context.Context, searchRequest searchdto.CommerceSearchRequest) (*graphql2.SearchResultDTO, error) {
 	return r.resolveCommerceProductSearch(ctx, searchRequest)
@@ -435,7 +453,9 @@ func direct(root *rootResolver) map[string]interface{} {
 		"Mutation.CommerceCartDeleteCartDelivery":             root.Mutation().CommerceCartDeleteCartDelivery,
 		"Mutation.CommerceCartDeleteItem":                     root.Mutation().CommerceCartDeleteItem,
 		"Mutation.CommerceCartUpdateItemQty":                  root.Mutation().CommerceCartUpdateItemQty,
+		"Mutation.CommerceCartUpdateItemBundleConfig":         root.Mutation().CommerceCartUpdateItemBundleConfig,
 		"Mutation.CommerceCartUpdateBillingAddress":           root.Mutation().CommerceCartUpdateBillingAddress,
+		"Mutation.CommerceCartUpdatePersonalData":             root.Mutation().CommerceCartUpdatePersonalData,
 		"Mutation.CommerceCartUpdateSelectedPayment":          root.Mutation().CommerceCartUpdateSelectedPayment,
 		"Mutation.CommerceCartApplyCouponCodeOrGiftCard":      root.Mutation().CommerceCartApplyCouponCodeOrGiftCard,
 		"Mutation.CommerceCartRemoveGiftCard":                 root.Mutation().CommerceCartRemoveGiftCard,

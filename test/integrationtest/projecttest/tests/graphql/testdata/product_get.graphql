@@ -11,6 +11,15 @@ query {
                 currency
             }
         }
+        specifications {
+            groups {
+                title
+                entries {
+                    label
+                    values
+                }
+            }
+        }
     }
 
     configurable: Commerce_Product(marketPlaceCode: "fake_configurable") {
@@ -19,11 +28,39 @@ query {
         meta {
             keywords
         }
+        specifications {
+            groups {
+                title
+                entries {
+                    label
+                    values
+                }
+            }
+        }
 
         ... on Commerce_Product_ConfigurableProduct {
-            variationSelections {
-                code
-                label
+            variantSelection {
+                variants {
+                    attributes {
+                        key
+                        value
+                    }
+                    variant {
+                        marketplaceCode
+                    }
+                }
+                attributes {
+                    label
+                    code
+                    options {
+                        label
+                        unitCode
+                        otherAttributesRestrictions {
+                            code
+                            availableOptions
+                        }
+                    }
+                }
             }
         }
     }
@@ -35,6 +72,15 @@ query {
         title
         meta {
             keywords
+        }
+        specifications {
+            groups {
+                title
+                entries {
+                    label
+                    values
+                }
+            }
         }
 
         ... on Commerce_Product_ActiveVariantProduct {

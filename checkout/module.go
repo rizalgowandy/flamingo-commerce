@@ -2,11 +2,12 @@ package checkout
 
 import (
 	"flamingo.me/dingo"
+	"github.com/go-playground/form/v4"
+
 	"flamingo.me/flamingo/v3/core/healthcheck/domain/healthcheck"
 	"flamingo.me/flamingo/v3/framework/flamingo"
 	"flamingo.me/flamingo/v3/framework/web"
 	flamingographql "flamingo.me/graphql"
-	"github.com/go-playground/form/v4"
 
 	"flamingo.me/flamingo-commerce/v3/checkout/infrastructure/contextstore"
 	"flamingo.me/flamingo-commerce/v3/checkout/interfaces/graphql/dto"
@@ -14,10 +15,8 @@ import (
 
 	"flamingo.me/flamingo-commerce/v3/cart"
 	"flamingo.me/flamingo-commerce/v3/checkout/application/placeorder"
-	"flamingo.me/flamingo-commerce/v3/checkout/domain"
 	"flamingo.me/flamingo-commerce/v3/checkout/domain/placeorder/process"
 	"flamingo.me/flamingo-commerce/v3/checkout/domain/placeorder/states"
-	"flamingo.me/flamingo-commerce/v3/checkout/infrastructure"
 	"flamingo.me/flamingo-commerce/v3/checkout/infrastructure/locker"
 	"flamingo.me/flamingo-commerce/v3/checkout/interfaces/controller"
 	"flamingo.me/flamingo-commerce/v3/checkout/interfaces/graphql"
@@ -26,7 +25,6 @@ import (
 type (
 	// Module registers our checkout module
 	Module struct {
-		UseFakeSourcingService bool   `inject:"config:commerce.checkout.useFakeSourcingService,optional"`
 		PlaceOrderLockType     string `inject:"config:commerce.checkout.placeorder.lock.type"`
 		PlaceOrderContextStore string `inject:"config:commerce.checkout.placeorder.contextstore.type"`
 	}
@@ -35,9 +33,6 @@ type (
 // Configure module
 func (m *Module) Configure(injector *dingo.Injector) {
 	injector.Bind((*form.Decoder)(nil)).ToProvider(form.NewDecoder).AsEagerSingleton()
-	if m.UseFakeSourcingService {
-		injector.Override((*domain.SourcingService)(nil), "").To(infrastructure.FakeSourcingService{})
-	}
 
 	if m.PlaceOrderLockType == "redis" {
 		injector.Bind(new(locker.Redis)).ToProvider(locker.NewRedis).In(dingo.Singleton)
@@ -106,6 +101,7 @@ func (m *Module) Configure(injector *dingo.Injector) {
 
 // CueConfig definition
 func (m *Module) CueConfig() string {
+	// language=cue
 	return `
 commerce: checkout: {
 	Redis :: {
@@ -114,9 +110,11 @@ commerce: checkout: {
 		network:                 string | *"tcp"
 		address:                 string | *"localhost:6379"
 		database:                number | *0
+		username?:               string & != ""
+		password?:               string & != ""
+		useTLS?:                 bool
 		ttl:                     string | *"2h"
 	}
-	activateDeprecatedSourcing:		    bool | *false
 	useDeliveryForms:                 bool | *true
 	usePersonalDataForm:              bool | *false
 	skipReviewAction:                 bool | *false
@@ -125,6 +123,9 @@ commerce: checkout: {
 	showEmptyCartPageIfNoItems?:      bool
 	redirectToCartOnInvalidCart?:     bool
 	privacyPolicyRequired?:           bool
+	orderService:{
+		skipCartValidation: bool | *false
+	}
 	placeorder: {
 		lock: {
 			type: *"memory" | "redis"
@@ -136,6 +137,11 @@ commerce: checkout: {
 			type: *"memory" | "redis"
 			if type == "redis" {
 				redis: Redis
+			}
+		}
+		states: {
+			placeorder: {
+				cancelOrdersDuringRollback: bool | *false		
 			}
 		}
 	}

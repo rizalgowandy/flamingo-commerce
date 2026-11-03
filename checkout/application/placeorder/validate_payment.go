@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.opencensus.io/trace"
+
 	"flamingo.me/flamingo-commerce/v3/checkout/domain/placeorder/process"
 	"flamingo.me/flamingo-commerce/v3/checkout/domain/placeorder/states"
 	"flamingo.me/flamingo-commerce/v3/payment/application"
@@ -17,10 +19,17 @@ const (
 	ValidatePaymentErrorNoWalletDetails = "no wallet details set for action"
 	// ValidatePaymentErrorNoActionDisplayData used for errors when the needed DisplayData/HTML is missing from the ActionData struct
 	ValidatePaymentErrorNoActionDisplayData = "no display data / html set for action"
+	// ValidatePaymentErrorStatusFailed used for errors when the payment status is failed
+	ValidatePaymentErrorStatusFailed = "payment process failed"
+	// ValidatePaymentErrorStatusCancelled used for errors when the payment status is cancelled
+	ValidatePaymentErrorStatusCancelled = "payment process cancelled"
 )
 
 // PaymentValidator to decide over the next state
 func PaymentValidator(ctx context.Context, p *process.Process, paymentService *application.PaymentService) process.RunResult {
+	ctx, span := trace.StartSpan(ctx, "checkout/PaymentValidator")
+	defer span.End()
+
 	cart := p.Context().Cart
 	gateway, err := paymentService.PaymentGatewayByCart(p.Context().Cart)
 	if err != nil {
@@ -86,7 +95,7 @@ func PaymentValidator(ctx context.Context, p *process.Process, paymentService *a
 					Failed: process.PaymentErrorOccurredReason{Error: ValidatePaymentErrorNoActionURL},
 				}
 			}
-			p.UpdateState(states.TriggerClientSDK{}.Name(), states.NewTriggerClientSDKStateData(flowStatus.ActionData.URL))
+			p.UpdateState(states.TriggerClientSDK{}.Name(), states.NewTriggerClientSDKStateData(flowStatus.ActionData.URL, flowStatus.ActionData.DisplayData))
 		default:
 			return process.RunResult{
 				Failed: process.PaymentErrorOccurredReason{Error: fmt.Sprintf("Payment action not supported: %q", flowStatus.Action)},
@@ -98,17 +107,17 @@ func PaymentValidator(ctx context.Context, p *process.Process, paymentService *a
 	case paymentDomain.PaymentFlowStatusCompleted:
 		// payment is done and confirmed, place order if not already placed
 		p.UpdateState(states.Success{}.Name(), nil)
-	case paymentDomain.PaymentFlowStatusFailed, paymentDomain.PaymentFlowStatusCancelled:
-		err := ""
-		if flowStatus.Error != nil {
-			err = flowStatus.Error.Error()
-		}
+	case paymentDomain.PaymentFlowStatusFailed:
 		return process.RunResult{
-			Failed: process.PaymentErrorOccurredReason{Error: err},
+			Failed: process.PaymentErrorOccurredReason{Error: ValidatePaymentErrorStatusFailed},
+		}
+	case paymentDomain.PaymentFlowStatusCancelled:
+		return process.RunResult{
+			Failed: process.PaymentErrorOccurredReason{Error: ValidatePaymentErrorStatusCancelled},
 		}
 	case paymentDomain.PaymentFlowStatusAborted:
 		return process.RunResult{
-			Failed: process.PaymentCanceledByCustomerReason{},
+			Failed: process.PaymentCanceledByCustomerReason{PaymentCancellationReason: paymentDomain.CancellationReasonAbortedByCustomer},
 		}
 	case paymentDomain.PaymentFlowWaitingForCustomer:
 		// payment pending, waiting for customer doing async stuff like finishing is payment in mobile app

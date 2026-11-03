@@ -25,13 +25,10 @@ func TestCart_MergeDiscounts(t *testing.T) {
 			cart: &cart.Cart{
 				Deliveries: func() []cart.Delivery {
 					result := make([]cart.Delivery, 0)
-					builder := cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-1")
-					delivery, _ := builder.Build()
-					result = append(result, *delivery)
-					builder = cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-2")
-					result = append(result, *delivery)
+					delivery := cart.Delivery{DeliveryInfo: cart.DeliveryInfo{Code: "code-1"}}
+					result = append(result, delivery)
+					delivery = cart.Delivery{DeliveryInfo: cart.DeliveryInfo{Code: "code-2"}}
+					result = append(result, delivery)
 					return result
 				}(),
 			},
@@ -42,15 +39,15 @@ func TestCart_MergeDiscounts(t *testing.T) {
 			cart: &cart.Cart{
 				Deliveries: func() []cart.Delivery {
 					result := make([]cart.Delivery, 0)
-					builder := cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-1")
-					builder.AddItem(cart.Item{})
-					builder.AddItem(cart.Item{})
-					delivery, _ := builder.Build()
-					result = append(result, *delivery)
-					builder = cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-2")
-					result = append(result, *delivery)
+					delivery := cart.Delivery{
+						DeliveryInfo: cart.DeliveryInfo{Code: "code-1"},
+						Cartitems:    []cart.Item{{}, {}},
+					}
+					result = append(result, delivery)
+					delivery = cart.Delivery{
+						DeliveryInfo: cart.DeliveryInfo{Code: "code-2"},
+					}
+					result = append(result, delivery)
 					return result
 				}(),
 			},
@@ -89,6 +86,17 @@ func TestCart_MergeDiscounts(t *testing.T) {
 					Type:         "type-2",
 					Applied:      domain.NewFromFloat(-20.0, "$"),
 					SortOrder:    4,
+				},
+				{
+					CampaignCode: "code-7",
+					Label:        "title-7",
+					Type:         "type-7",
+					Applied:      domain.NewFromFloat(-40.0, "$"),
+					SortOrder:    6,
+					CustomAttributes: map[string]interface{}{
+						"attr1": 3,
+						"attr2": 1,
+					},
 				},
 			},
 		},
@@ -169,6 +177,17 @@ func TestCart_MergeDiscounts(t *testing.T) {
 					Applied:      domain.NewFromFloat(-20.0, "$"),
 					SortOrder:    5,
 				},
+				{
+					CampaignCode: "code-7",
+					Label:        "title-7",
+					Type:         "type-7",
+					Applied:      domain.NewFromFloat(-20.0, "$"),
+					SortOrder:    6,
+					CustomAttributes: map[string]interface{}{
+						"attr1": 3,
+						"attr2": 1,
+					},
+				},
 			},
 		},
 		{
@@ -176,17 +195,19 @@ func TestCart_MergeDiscounts(t *testing.T) {
 			cart: &cart.Cart{
 				Deliveries: func() []cart.Delivery {
 					result := make([]cart.Delivery, 0)
-					builder := cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-1")
-					builder.AddItem(cart.Item{})
-					builder.AddItem(cart.Item{})
-					builder.SetShippingItem(*testutils.BuildShippingItemWithDiscounts(t))
-					delivery, _ := builder.Build()
-					result = append(result, *delivery)
-					builder = cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-2")
-					builder.SetShippingItem(*testutils.BuildShippingItemWithDiscounts(t))
-					result = append(result, *delivery)
+
+					delivery := cart.Delivery{
+						DeliveryInfo: cart.DeliveryInfo{Code: "code-1"},
+						Cartitems:    []cart.Item{{}, {}},
+						ShippingItem: *testutils.BuildShippingItemWithDiscounts(t),
+					}
+					result = append(result, delivery)
+					delivery = cart.Delivery{
+						DeliveryInfo: cart.DeliveryInfo{Code: "code-2"},
+						Cartitems:    []cart.Item{{}, {}},
+						ShippingItem: *testutils.BuildShippingItemWithDiscounts(t),
+					}
+					result = append(result, delivery)
 					return result
 				}(),
 			},
@@ -263,13 +284,10 @@ func TestCart_HasDiscounts(t *testing.T) {
 			cart: &cart.Cart{
 				Deliveries: func() []cart.Delivery {
 					result := make([]cart.Delivery, 0)
-					builder := cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-1")
-					delivery, _ := builder.Build()
-					result = append(result, *delivery)
-					builder = cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-2")
-					result = append(result, *delivery)
+					delivery := cart.Delivery{DeliveryInfo: cart.DeliveryInfo{Code: "code-1"}}
+					result = append(result, delivery)
+					delivery = cart.Delivery{DeliveryInfo: cart.DeliveryInfo{Code: "code-2"}}
+					result = append(result, delivery)
 					return result
 				}(),
 			},
@@ -280,15 +298,10 @@ func TestCart_HasDiscounts(t *testing.T) {
 			cart: &cart.Cart{
 				Deliveries: func() []cart.Delivery {
 					result := make([]cart.Delivery, 0)
-					builder := cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-1")
-					builder.AddItem(cart.Item{})
-					builder.AddItem(cart.Item{})
-					delivery, _ := builder.Build()
-					result = append(result, *delivery)
-					builder = cart.DeliveryBuilder{}
-					builder.SetDeliveryCode("code-2")
-					result = append(result, *delivery)
+					delivery := cart.Delivery{DeliveryInfo: cart.DeliveryInfo{Code: "code-1"}, Cartitems: []cart.Item{{}, {}}}
+					result = append(result, delivery)
+					delivery = cart.Delivery{DeliveryInfo: cart.DeliveryInfo{Code: "code-2"}, Cartitems: []cart.Item{{}, {}}}
+					result = append(result, delivery)
 					return result
 				}(),
 			},
@@ -394,6 +407,17 @@ func TestDelivery_MergeDiscounts(t *testing.T) {
 					Applied:      domain.NewFromFloat(-10.0, "$"),
 					SortOrder:    5,
 				},
+				{
+					CampaignCode: "code-7",
+					Label:        "title-7",
+					Type:         "type-7",
+					Applied:      domain.NewFromFloat(-10.0, "$"),
+					SortOrder:    6,
+					CustomAttributes: map[string]interface{}{
+						"attr1": 3,
+						"attr2": 1,
+					},
+				},
 			},
 		},
 		{
@@ -474,6 +498,17 @@ func TestDelivery_MergeDiscounts(t *testing.T) {
 					Type:         "type-1",
 					Applied:      domain.NewFromFloat(-10.0, "$"),
 					SortOrder:    5,
+				},
+				{
+					CampaignCode: "code-7",
+					Label:        "title-7",
+					Type:         "type-7",
+					Applied:      domain.NewFromFloat(-10.0, "$"),
+					SortOrder:    6,
+					CustomAttributes: map[string]interface{}{
+						"attr1": 3,
+						"attr2": 1,
+					},
 				},
 			},
 		},
@@ -582,6 +617,17 @@ func TestItem_MergeDiscounts(t *testing.T) {
 					Applied:      domain.NewFromFloat(-5.0, "$"),
 					SortOrder:    4,
 				},
+				{
+					CampaignCode: "code-7",
+					Label:        "title-7",
+					Type:         "type-7",
+					Applied:      domain.NewFromFloat(-10.0, "$"),
+					SortOrder:    6,
+					CustomAttributes: map[string]interface{}{
+						"attr1": 3,
+						"attr2": 1,
+					},
+				},
 			},
 		},
 	}
@@ -608,16 +654,11 @@ func TestItem_HasDiscounts(t *testing.T) {
 		},
 		{
 			name: "multiple discounts on item",
-			item: func() *cart.Item {
-				builder := cart.ItemBuilder{}
-				builder.AddDiscount(cart.AppliedDiscount{
-					CampaignCode: "code-1",
-					Label:        "title-1",
-					Type:         "type-1",
-				})
-				item, _ := builder.Build()
-				return item
-			}(),
+			item: &cart.Item{AppliedDiscounts: []cart.AppliedDiscount{cart.AppliedDiscount{
+				CampaignCode: "code-1",
+				Label:        "title-1",
+				Type:         "type-1",
+			}}},
 			want: true,
 		},
 		{
@@ -888,7 +929,7 @@ func TestAppliedDiscounts_Sum(t *testing.T) {
 					CampaignCode: "code-1",
 					Label:        "title-1",
 					Type:         "type-1",
-					Applied:      domain.NewFromFloat(-10.0, "€"),
+					Applied:      domain.NewFromFloat(-10.0, "EUR"),
 					SortOrder:    0,
 				},
 			},

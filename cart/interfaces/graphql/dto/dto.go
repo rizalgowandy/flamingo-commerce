@@ -2,6 +2,7 @@ package dto
 
 import (
 	"flamingo.me/flamingo-commerce/v3/cart/interfaces/controller/forms"
+	productDomain "flamingo.me/flamingo-commerce/v3/product/domain"
 
 	"time"
 
@@ -12,6 +13,13 @@ type (
 	// BillingAddressForm is the GraphQL representation of the billing form
 	BillingAddressForm struct {
 		FormData       forms.AddressForm
+		Processed      bool
+		ValidationInfo ValidationInfo
+	}
+
+	// PersonalDataForm is the GraphQL representation of the billing form
+	PersonalDataForm struct {
+		PersonalData   forms.DefaultPersonalDataForm
 		Processed      bool
 		ValidationInfo ValidationInfo
 	}
@@ -47,7 +55,7 @@ type (
 		MessageKey string
 		// DefaultLabel - a speaking error label. OFten used to show to end user - in case no translation exists
 		DefaultLabel string
-		//FieldName
+		// FieldName
 		FieldName string
 	}
 
@@ -61,4 +69,39 @@ type (
 	UpdateShippingOptionsResult struct {
 		Processed bool
 	}
+
+	AddToCart struct {
+		MarketplaceCode        string
+		Qty                    int
+		DeliveryCode           string
+		VariantMarketplaceCode string
+		BundleConfiguration    []ChoiceConfiguration
+	}
+
+	ChoiceConfiguration struct {
+		Identifier             string
+		MarketplaceCode        string
+		VariantMarketplaceCode *string
+		Qty                    int
+	}
 )
+
+func MapBundleConfigToDomain(graphqlBundleConfig []ChoiceConfiguration) productDomain.BundleConfiguration {
+	cartBundleConfiguration := make(map[productDomain.Identifier]productDomain.ChoiceConfiguration)
+
+	for _, configuration := range graphqlBundleConfig {
+		variantMarketplaceCode := ""
+
+		if configuration.VariantMarketplaceCode != nil {
+			variantMarketplaceCode = *configuration.VariantMarketplaceCode
+		}
+
+		cartBundleConfiguration[productDomain.Identifier(configuration.Identifier)] = productDomain.ChoiceConfiguration{
+			MarketplaceCode:        configuration.MarketplaceCode,
+			VariantMarketplaceCode: variantMarketplaceCode,
+			Qty:                    configuration.Qty,
+		}
+	}
+
+	return cartBundleConfiguration
+}

@@ -83,9 +83,14 @@ func (avp ActiveVariantProduct) Meta() ProductMeta {
 
 // Loyalty contains loyalty information of the active variant
 func (avp ActiveVariantProduct) Loyalty() ProductLoyalty {
+	loyalties := make([]productDomain.LoyaltyPriceInfo, 0, len(avp.getActiveVariant().Saleable.LoyaltyPrices))
+
+	loyalties = append(loyalties, avp.getActiveVariant().Saleable.LoyaltyPrices...)
+
 	return ProductLoyalty{
-		Price:   avp.product.TeaserData().TeaserLoyaltyPriceInfo,
-		Earning: avp.product.TeaserData().TeaserLoyaltyEarningInfo,
+		Price:           avp.product.TeaserData().TeaserLoyaltyPriceInfo,
+		AvailablePrices: loyalties,
+		Earning:         avp.product.TeaserData().TeaserLoyaltyEarningInfo,
 	}
 }
 
@@ -112,9 +117,10 @@ func (avp ActiveVariantProduct) ActiveVariationSelections() []ActiveVariationSel
 		for _, option := range variationSelection.Options {
 			if option.State == VariationSelectionOptionStateActive {
 				activeVariationSelections = append(activeVariationSelections, ActiveVariationSelection{
-					Code:  variationSelection.Code,
-					Label: variationSelection.Label,
-					Value: option.Label,
+					Code:     variationSelection.Code,
+					Label:    variationSelection.Label,
+					Value:    option.Label,
+					UnitCode: option.Variant.BaseData().Attribute(variationSelection.Code).UnitCode,
 				})
 			}
 		}
@@ -128,4 +134,9 @@ func (avp ActiveVariantProduct) Badges() ProductBadges {
 	return ProductBadges{
 		All: avp.getActiveVariant().BaseData().Badges,
 	}
+}
+
+// Specifications of the active variant
+func (avp ActiveVariantProduct) Specifications() *ProductSpecifications {
+	return MapSpecifications(avp.getActiveVariant().BaseData().GetSpecifications())
 }

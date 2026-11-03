@@ -2,10 +2,11 @@ package fake
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"math/rand"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,20 +27,27 @@ var (
 		"Dior",
 		"Hugo Boss",
 	}
+
+	inflightLoyaltyAmount = 500.0
+	hdLoyaltyAmount       = 600.0
 )
 
 // ProductService is just mocking stuff
 type ProductService struct {
-	currencyCode  string
-	testDataFiles map[string]string
-	logger        flamingo.Logger
+	currencyCode           string
+	testDataFiles          map[string]string
+	logger                 flamingo.Logger
+	deliverDefaultProducts bool
+	deliveryCodes          []string
 }
 
 // Inject dependencies
 func (ps *ProductService) Inject(logger flamingo.Logger,
 	c *struct {
-		CurrencyCode   string `inject:"config:commerce.product.fakeservice.currency,optional"`
-		TestDataFolder string `inject:"config:commerce.product.fakeservice.jsonTestDataFolder,optional"`
+		CurrencyCode            string   `inject:"config:commerce.product.fakeservice.currency,optional"`
+		TestDataFolder          string   `inject:"config:commerce.product.fakeservice.jsonTestDataFolder,optional"`
+		DeliveryDefaultProducts bool     `inject:"config:commerce.product.fakeservice.defaultProducts,optional"`
+		DeliveryCodes           []string `inject:"config:commerce.product.fakeservice.deliveryCodes,optional"`
 	},
 ) *ProductService {
 	ps.logger = logger
@@ -48,6 +56,9 @@ func (ps *ProductService) Inject(logger flamingo.Logger,
 		if len(c.TestDataFolder) > 0 {
 			ps.testDataFiles = registerTestData(c.TestDataFolder, ps.logger)
 		}
+
+		ps.deliverDefaultProducts = c.DeliveryDefaultProducts
+		ps.deliveryCodes = c.DeliveryCodes
 	}
 
 	return ps
@@ -73,10 +84,12 @@ func (ps *ProductService) Get(_ context.Context, marketplaceCode string) (domain
 
 	case "fake_simple_out_of_stock":
 		return ps.FakeSimple(marketplaceCode, false, false, true, true, false), nil
+	case "fake_bundle":
+		return ps.FakeBundle(marketplaceCode, false, false, true, true, false), nil
 	default:
 		jsonProduct, err := ps.getProductFromJSON(marketplaceCode)
 		if err != nil {
-			if _, isProductNotFoundError := err.(domain.ProductNotFound); !isProductNotFoundError {
+			if !errors.Is(err, domain.ErrProductNotFound) {
 				return nil, err
 			}
 		} else {
@@ -85,9 +98,10 @@ func (ps *ProductService) Get(_ context.Context, marketplaceCode string) (domain
 	}
 
 	marketPlaceCodes := ps.GetMarketPlaceCodes()
-	return nil, domain.ProductNotFound{
+
+	return nil, errors.Join(domain.ProductNotFound{
 		MarketplaceCode: "Code " + marketplaceCode + " Not implemented in FAKE: Only following codes should be used" + strings.Join(marketPlaceCodes, ", "),
-	}
+	}, domain.ErrProductNotFound)
 }
 
 // FakeSimple generates a simple fake product
@@ -100,10 +114,20 @@ func (ps *ProductService) FakeSimple(marketplaceCode string, isNew bool, isExclu
 		IsSaleable:   true,
 		SaleableTo:   time.Now().Add(time.Hour * time.Duration(1)),
 		SaleableFrom: time.Now().Add(time.Hour * time.Duration(-1)),
+		ActiveLoyaltyPrice: &domain.LoyaltyPriceInfo{
+			Type:    "AwesomeLoyaltyProgram",
+			Default: priceDomain.NewFromFloat(inflightLoyaltyAmount, "BonusPoints"),
+		},
 		LoyaltyPrices: []domain.LoyaltyPriceInfo{
 			{
 				Type:    "AwesomeLoyaltyProgram",
-				Default: priceDomain.NewFromFloat(500, "BonusPoints"),
+				Default: priceDomain.NewFromFloat(inflightLoyaltyAmount, "BonusPoints"),
+				Context: domain.PriceContext{DeliveryCode: "inflight"},
+			},
+			{
+				Type:    "AwesomeLoyaltyProgram",
+				Default: priceDomain.NewFromFloat(hdLoyaltyAmount, "BonusPoints"),
+				Context: domain.PriceContext{DeliveryCode: "delivery____domestichome"},
 			},
 		},
 		LoyaltyEarnings: []domain.LoyaltyEarningInfo{
@@ -166,16 +190,36 @@ func (ps *ProductService) FakeSimple(marketplaceCode string, isNew bool, isExclu
 		}
 	}
 
-	product.StockLevel = domain.StockLevelInStock
+	product.Stock = ps.getStock(true, domain.StockLevelInStock, 999)
+
 	if isOutOfStock {
-		product.StockLevel = domain.StockLevelOutOfStock
+		product.Stock = ps.getStock(false, domain.StockLevelOutOfStock, 0)
 	}
 
 	return product
 }
 
+func (ps *ProductService) getStock(inStock bool, level string, amount int) []domain.Stock {
+	stock := make([]domain.Stock, 0)
+
+	for _, code := range ps.deliveryCodes {
+		stock = append(stock, domain.Stock{
+			Amount:       amount,
+			InStock:      inStock,
+			Level:        level,
+			DeliveryCode: code,
+		})
+	}
+
+	return stock
+}
+
 // GetMarketPlaceCodes returns list of available marketplace codes which are supported by this fakeservice
 func (ps *ProductService) GetMarketPlaceCodes() []string {
+	if !ps.deliverDefaultProducts {
+		return ps.jsonProductCodes()
+	}
+
 	marketPlaceCodes := []string{
 		"fake_configurable",
 		"fake_configurable_with_active_variant",
@@ -199,7 +243,7 @@ func (ps *ProductService) getFakeConfigurable(marketplaceCode string) domain.Con
 	product.VariantVariationAttributes = []string{"color", "size"}
 	product.VariantVariationAttributesSorting = map[string][]string{
 		"size":  {"M", "L"},
-		"color": {"Red", "White", "Black"},
+		"color": {"red", "white", "black"},
 	}
 
 	return product
@@ -213,52 +257,52 @@ func (ps *ProductService) getFakeConfigurableWithVariants(marketplaceCode string
 		marketplaceCode string
 		title           string
 		attributes      domain.Attributes
-		stockLevel      string
+		stock           []domain.Stock
 		badges          []domain.Badge
 	}{
 		{"shirt-red-s", "Shirt Red S", domain.Attributes{
 			"size":                  domain.Attribute{RawValue: "S", Code: "size", CodeLabel: "Size", Label: "S"},
 			"manufacturerColor":     domain.Attribute{RawValue: "red", Code: "manufacturerColor", CodeLabel: "Manufacturer Color", Label: "Red"},
 			"manufacturerColorCode": domain.Attribute{RawValue: "#ff0000", Code: "manufacturerColorCode", CodeLabel: "Manufacturer Color Code", Label: "BloodRed"}},
-			"high",
+			ps.getStock(true, domain.StockLevelInStock, 999),
 			[]domain.Badge{{Code: "new", Label: "New"}},
 		},
 		{"shirt-white-s", "Shirt White S", domain.Attributes{
 			"size":                  domain.Attribute{RawValue: "S", Code: "size", CodeLabel: "Size", Label: "S"},
 			"manufacturerColor":     domain.Attribute{RawValue: "white", Code: "manufacturerColor", CodeLabel: "Manufacturer Color", Label: "White"},
 			"manufacturerColorCode": domain.Attribute{RawValue: "#ffffff", Code: "manufacturerColorCode", CodeLabel: "Manufacturer Color Code", Label: "SnowWhite"}},
-			"high",
+			ps.getStock(true, domain.StockLevelInStock, 999),
 			nil,
 		},
 		{"shirt-white-m", "Shirt White M", domain.Attributes{
 			"size":  domain.Attribute{RawValue: "M", Code: "size", CodeLabel: "Size", Label: "M"},
 			"color": domain.Attribute{RawValue: "white", Code: "color", CodeLabel: "Color", Label: "White"}},
-			"high",
+			ps.getStock(true, domain.StockLevelInStock, 999),
 			nil,
 		},
 		{"shirt-black-m", "Shirt Black M", domain.Attributes{
 			"size":                  domain.Attribute{RawValue: "M", Code: "size", CodeLabel: "Size", Label: "M"},
 			"manufacturerColor":     domain.Attribute{RawValue: "blue", Code: "manufacturerColor", CodeLabel: "Manufacturer Color", Label: "Blue"},
 			"manufacturerColorCode": domain.Attribute{RawValue: "#0000ff", Code: "manufacturerColorCode", CodeLabel: "Manufacturer Color Code", Label: "SkyBlue"}},
-			"high",
+			ps.getStock(true, domain.StockLevelInStock, 999),
 			nil,
 		},
 		{"shirt-black-l", "Shirt Black L", domain.Attributes{
 			"size":  domain.Attribute{RawValue: "L", Code: "size", CodeLabel: "Size", Label: "L"},
 			"color": domain.Attribute{RawValue: "black", Code: "color", CodeLabel: "Color", Label: "Black"}},
-			"high",
+			ps.getStock(true, domain.StockLevelInStock, 999),
 			nil,
 		},
 		{"shirt-red-l", "Shirt Red L", domain.Attributes{
 			"size":  domain.Attribute{RawValue: "L", Code: "size", CodeLabel: "Size", Label: "L"},
 			"color": domain.Attribute{RawValue: "red", Code: "color", CodeLabel: "Color", Label: "Red"}},
-			"out",
+			ps.getStock(false, domain.StockLevelOutOfStock, 0),
 			nil,
 		},
 		{"shirt-red-m", "Shirt Red M", domain.Attributes{
 			"size":  domain.Attribute{RawValue: "M", Code: "size", CodeLabel: "Size", Label: "M"},
 			"color": domain.Attribute{RawValue: "red", Code: "color", CodeLabel: "Color", Label: "Red"}},
-			"out",
+			ps.getStock(false, domain.StockLevelOutOfStock, 0),
 			nil,
 		},
 	}
@@ -272,7 +316,7 @@ func (ps *ProductService) getFakeConfigurableWithVariants(marketplaceCode string
 			simpleVariant.BasicProductData.Attributes[key] = attr
 		}
 
-		simpleVariant.StockLevel = variant.stockLevel
+		simpleVariant.Stock = variant.stock
 
 		// Give new images for variants with custom colors
 		if simpleVariant.Attributes.HasAttribute("manufacturerColorCode") {
@@ -336,6 +380,28 @@ func (ps *ProductService) addBasicData(product *domain.BasicProductData) {
 		"brandName":        domain.Attribute{Code: "brandName", Label: brand, RawValue: brandValue},
 		"collectionOption": domain.Attribute{Code: "collectionOption", Label: "Collection option", RawValue: []interface{}{"departure", "arrival"}},
 		"urlSlug":          domain.Attribute{Code: "urlSlug", Label: "product-slug", RawValue: "product-slug"},
+		"specifications": domain.Attribute{
+			Code:  "specifications",
+			Label: "Specifications",
+			RawValue: domain.Specifications{
+				Groups: []domain.SpecificationGroup{
+					{
+						Title: "Technical Details",
+						Entries: []domain.SpecificationEntry{
+							{Label: "Weight", Values: []string{"500g"}},
+							{Label: "Dimensions", Values: []string{"10x20x30 cm"}},
+						},
+					},
+					{
+						Title: "Material",
+						Entries: []domain.SpecificationEntry{
+							{Label: "Outer Material", Values: []string{"Cotton", "Polyester"}},
+							{Label: "Inner Material", Values: []string{"Silk"}},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	product.RetailerCode = "retailer"
@@ -352,10 +418,14 @@ func (ps *ProductService) addBasicData(product *domain.BasicProductData) {
 		Name: "Configurable",
 		Code: "configurable",
 	}
+	badgeColor := "#E30613"
+	badgePriority := 100
 	badges := []domain.Badge{
 		{
-			Code:  "new",
-			Label: "New",
+			Code:     "new",
+			Label:    "New",
+			Color:    &badgeColor,
+			Priority: &badgePriority,
 		},
 	}
 	product.Categories = append(product.Categories, categoryTeaser1)
@@ -390,10 +460,10 @@ func (ps *ProductService) getProductFromJSON(code string) (domain.BasicProduct, 
 	file, ok := ps.testDataFiles[code]
 
 	if !ok {
-		return nil, &domain.ProductNotFound{MarketplaceCode: code}
+		return nil, errors.Join(&domain.ProductNotFound{MarketplaceCode: code}, domain.ErrProductNotFound)
 	}
 
-	jsonBytes, err := ioutil.ReadFile(file)
+	jsonBytes, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -409,4 +479,136 @@ func (ps *ProductService) jsonProductCodes() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// FakeBundle generates a bundle fake product
+func (ps *ProductService) FakeBundle(marketplaceCode string, isNew bool, isExclusive bool, isOutOfStock bool, isDiscounted bool, hasFixedPrice bool) domain.BundleProduct {
+	product := domain.BundleProduct{}
+	product.Title = "TypeBundle product"
+	ps.addBasicData(&product.BasicProductData)
+
+	product.Saleable = domain.Saleable{
+		IsSaleable:   true,
+		SaleableTo:   time.Now().Add(time.Hour * time.Duration(1)),
+		SaleableFrom: time.Now().Add(time.Hour * time.Duration(-1)),
+		ActiveLoyaltyPrice: &domain.LoyaltyPriceInfo{
+			Type:    "AwesomeLoyaltyProgram",
+			Default: priceDomain.NewFromFloat(inflightLoyaltyAmount, "BonusPoints"),
+		},
+		LoyaltyPrices: []domain.LoyaltyPriceInfo{
+			{
+				Type:    "AwesomeLoyaltyProgram",
+				Default: priceDomain.NewFromFloat(inflightLoyaltyAmount, "BonusPoints"),
+				Context: domain.PriceContext{DeliveryCode: "inflight"},
+			},
+			{
+				Type:    "AwesomeLoyaltyProgram",
+				Default: priceDomain.NewFromFloat(hdLoyaltyAmount, "BonusPoints"),
+				Context: domain.PriceContext{DeliveryCode: "delivery____domestichome"},
+			},
+		},
+		LoyaltyEarnings: []domain.LoyaltyEarningInfo{
+			{
+				Type:    "AwesomeLoyaltyProgram",
+				Default: priceDomain.NewFromFloat(23.23, "BonusPoints"),
+			},
+		},
+	}
+
+	discountedPrice := 0.0
+	if isDiscounted {
+		discountedPrice = 10.49 + float64(rand.Intn(10))
+		if hasFixedPrice {
+			discountedPrice = 10.49
+		}
+	}
+
+	defaultPrice := 21.37 + float64(rand.Intn(10))
+	if hasFixedPrice {
+		defaultPrice = 20.99
+	}
+
+	product.ActivePrice = ps.getPrice(defaultPrice, discountedPrice)
+	product.MarketPlaceCode = marketplaceCode
+
+	product.CreatedAt = time.Date(2019, 6, 29, 00, 00, 00, 00, time.UTC)
+	product.UpdatedAt = time.Date(2019, 7, 29, 12, 00, 00, 00, time.UTC)
+	product.VisibleFrom = time.Date(2019, 7, 29, 12, 00, 00, 00, time.UTC)
+	product.VisibleTo = time.Now().Add(time.Hour * time.Duration(10))
+
+	product.Teaser = domain.TeaserData{
+		ShortDescription: product.ShortDescription,
+		ShortTitle:       product.Title,
+		URLSlug:          product.BaseData().Attributes["urlSlug"].Value(),
+		Media:            product.Media,
+		MarketPlaceCode:  product.MarketPlaceCode,
+		TeaserPrice: domain.PriceInfo{
+			Default: priceDomain.NewFromFloat(9.99, "SD").GetPayable(),
+		},
+		TeaserLoyaltyPriceInfo: &domain.LoyaltyPriceInfo{
+			Type:    "AwesomeLoyaltyProgram",
+			Default: priceDomain.NewFromFloat(500, "BonusPoints"),
+		},
+		TeaserLoyaltyEarningInfo: &domain.LoyaltyEarningInfo{
+			Type:    "AwesomeLoyaltyProgram",
+			Default: priceDomain.NewFromFloat(23.23, "BonusPoints"),
+		},
+		Badges: product.Badges,
+	}
+
+	if isNew {
+		product.BasicProductData.IsNew = true
+	}
+
+	if isExclusive {
+		product.Attributes["exclusiveProduct"] = domain.Attribute{
+			RawValue: "30002654_yes",
+			Code:     "exclusiveProduct",
+		}
+	}
+
+	product.Stock = ps.getStock(true, domain.StockLevelInStock, 999)
+
+	if isOutOfStock {
+		product.Stock = ps.getStock(false, domain.StockLevelOutOfStock, 0)
+	}
+
+	product.Choices = []domain.Choice{
+		{
+			Identifier: "identifier1",
+			Required:   true,
+			Label:      "first choice",
+			Options: []domain.Option{
+				{
+					MinQty:  1,
+					MaxQty:  1,
+					Product: ps.FakeSimple("simple_option1", false, false, false, true, true),
+				},
+				{
+					MinQty:  1,
+					MaxQty:  1,
+					Product: ps.FakeSimple("simple_option2", false, false, false, true, true),
+				},
+			},
+		},
+		{
+			Identifier: "identifier2",
+			Required:   true,
+			Label:      "second choice",
+			Options: []domain.Option{
+				{
+					MinQty:  1,
+					MaxQty:  1,
+					Product: ps.getFakeConfigurableWithVariants("configurable_option1"),
+				},
+				{
+					MinQty:  1,
+					MaxQty:  1,
+					Product: ps.getFakeConfigurableWithVariants("configurable_option2"),
+				},
+			},
+		},
+	}
+
+	return product
 }

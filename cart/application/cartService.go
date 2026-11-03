@@ -3,10 +3,12 @@ package application
 import (
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
 
+	"go.opencensus.io/trace"
+
 	"flamingo.me/flamingo/v3/core/auth"
-	"github.com/pkg/errors"
 
 	"flamingo.me/flamingo/v3/framework/flamingo"
 	"flamingo.me/flamingo/v3/framework/web"
@@ -62,7 +64,23 @@ type (
 
 	// PromotionFunction type takes ctx, cart, couponCode and applies the promotion
 	promotionFunc func(context.Context, *cartDomain.Cart, string) (*cartDomain.Cart, cartDomain.DeferEvents, error)
+
+	contextKeyType string
 )
+
+const (
+	itemIDKey contextKeyType = "item_id"
+)
+
+func ItemIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(itemIDKey).(string)
+
+	return id
+}
+
+func ContextWithItemID(ctx context.Context, itemID string) context.Context {
+	return context.WithValue(ctx, itemIDKey, itemID)
+}
 
 func init() {
 	gob.Register(RestrictionError{})
@@ -74,7 +92,11 @@ func (e *RestrictionError) Error() string {
 	return e.message
 }
 
-var _ Service = &CartService{}
+var (
+	_                          Service = &CartService{}
+	ErrBundleConfigNotProvided         = errors.New("error no bundle config provided")
+	ErrProductNotTypeBundle            = errors.New("product not of type bundle")
+)
 
 // Inject dependencies
 func (cs *CartService) Inject(
@@ -124,6 +146,8 @@ func (cs *CartService) GetCartReceiverService() *CartReceiverService {
 
 // ValidateCart validates a carts content
 func (cs *CartService) ValidateCart(ctx context.Context, session *web.Session, decoratedCart *decorator.DecoratedCart) validation.Result {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ValidateCart")
+	defer span.End()
 
 	if cs.cartValidator != nil {
 		result := cs.cartValidator.Validate(ctx, session, decoratedCart)
@@ -136,6 +160,9 @@ func (cs *CartService) ValidateCart(ctx context.Context, session *web.Session, d
 
 // ValidateCurrentCart validates the current active cart
 func (cs *CartService) ValidateCurrentCart(ctx context.Context, session *web.Session) (validation.Result, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ValidateCurrentCart")
+	defer span.End()
+
 	decoratedCart, err := cs.cartReceiverService.ViewDecoratedCart(ctx, session)
 	if err != nil {
 		return validation.Result{}, err
@@ -146,6 +173,9 @@ func (cs *CartService) ValidateCurrentCart(ctx context.Context, session *web.Ses
 
 // UpdatePaymentSelection updates the paymentselection in the cart
 func (cs *CartService) UpdatePaymentSelection(ctx context.Context, session *web.Session, paymentSelection cartDomain.PaymentSelection) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdatePaymentSelection")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -160,7 +190,10 @@ func (cs *CartService) UpdatePaymentSelection(ctx context.Context, session *web.
 	cart, defers, err = behaviour.UpdatePaymentSelection(ctx, cart, paymentSelection)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdatePaymentSelection").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdatePaymentSelection").Error(err)
+		}
 
 		return err
 	}
@@ -170,6 +203,9 @@ func (cs *CartService) UpdatePaymentSelection(ctx context.Context, session *web.
 
 // UpdateBillingAddress updates the billing address on the cart
 func (cs *CartService) UpdateBillingAddress(ctx context.Context, session *web.Session, billingAddress *cartDomain.Address) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateBillingAddress")
+	defer span.End()
+
 	if billingAddress == nil {
 		return nil
 	}
@@ -187,7 +223,10 @@ func (cs *CartService) UpdateBillingAddress(ctx context.Context, session *web.Se
 	cart, defers, err = behaviour.UpdateBillingAddress(ctx, cart, *billingAddress)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateBillingAddress").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateBillingAddress").Error(err)
+		}
 
 		return err
 	}
@@ -197,6 +236,9 @@ func (cs *CartService) UpdateBillingAddress(ctx context.Context, session *web.Se
 
 // UpdateDeliveryInfo updates the delivery info on the cart
 func (cs *CartService) UpdateDeliveryInfo(ctx context.Context, session *web.Session, deliveryCode string, deliveryInfo cartDomain.DeliveryInfoUpdateCommand) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateDeliveryInfo")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -215,7 +257,10 @@ func (cs *CartService) UpdateDeliveryInfo(ctx context.Context, session *web.Sess
 	cart, defers, err = behaviour.UpdateDeliveryInfo(ctx, cart, deliveryCode, deliveryInfo)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateDeliveryInfo").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateDeliveryInfo").Error(err)
+		}
 
 		return err
 	}
@@ -225,6 +270,9 @@ func (cs *CartService) UpdateDeliveryInfo(ctx context.Context, session *web.Sess
 
 // UpdatePurchaser updates the purchaser on the cart
 func (cs *CartService) UpdatePurchaser(ctx context.Context, session *web.Session, purchaser *cartDomain.Person, additionalData *cartDomain.AdditionalData) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdatePurchaser")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -239,7 +287,10 @@ func (cs *CartService) UpdatePurchaser(ctx context.Context, session *web.Session
 	cart, defers, err = behaviour.UpdatePurchaser(ctx, cart, purchaser, additionalData)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdatePurchaser").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdatePurchaser").Error(err)
+		}
 
 		return err
 	}
@@ -249,6 +300,9 @@ func (cs *CartService) UpdatePurchaser(ctx context.Context, session *web.Session
 
 // UpdateItemQty updates a single cart item qty
 func (cs *CartService) UpdateItemQty(ctx context.Context, session *web.Session, itemID string, deliveryCode string, qty int) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateItemQty")
+	defer span.End()
+
 	if qty < 1 {
 		// item needs to be removed, let DeleteItem handle caching/events
 		return cs.DeleteItem(ctx, session, itemID, deliveryCode)
@@ -271,7 +325,10 @@ func (cs *CartService) UpdateItemQty(ctx context.Context, session *web.Session, 
 
 	item, err := cart.GetByItemID(itemID)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemQty").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemQty").Error(err)
+		}
 
 		return err
 	}
@@ -280,12 +337,13 @@ func (cs *CartService) UpdateItemQty(ctx context.Context, session *web.Session, 
 
 	product, err := cs.productService.Get(ctx, item.MarketplaceCode)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemQty").Error(err)
-
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemQty").Error(err)
+		}
 		return err
 	}
 
-	product, err = cs.getProductWithActiveVariantIfProductIsConfigurable(ctx, product, item.VariantMarketPlaceCode)
+	product, err = cs.getSpecificProductType(ctx, product, item.VariantMarketPlaceCode, item.BundleConfig)
 	if err != nil {
 		return err
 	}
@@ -306,8 +364,10 @@ func (cs *CartService) UpdateItemQty(ctx context.Context, session *web.Session, 
 	cart, defers, err = behaviour.UpdateItem(ctx, cart, itemUpdate)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemQty").Error(err)
 
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemQty").Error(err)
+		}
 		return err
 	}
 
@@ -328,6 +388,9 @@ func (cs *CartService) UpdateItemQty(ctx context.Context, session *web.Session, 
 
 // UpdateItemSourceID updates an item source id
 func (cs *CartService) UpdateItemSourceID(ctx context.Context, session *web.Session, itemID string, sourceID string) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateItemSourceID")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -341,8 +404,9 @@ func (cs *CartService) UpdateItemSourceID(ctx context.Context, session *web.Sess
 
 	_, err = cart.GetByItemID(itemID)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
-
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
+		}
 		return err
 	}
 
@@ -354,7 +418,10 @@ func (cs *CartService) UpdateItemSourceID(ctx context.Context, session *web.Sess
 	cart, defers, err = behaviour.UpdateItem(ctx, cart, itemUpdate)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
+		}
 
 		return err
 	}
@@ -364,6 +431,9 @@ func (cs *CartService) UpdateItemSourceID(ctx context.Context, session *web.Sess
 
 // UpdateItems updates multiple items
 func (cs *CartService) UpdateItems(ctx context.Context, session *web.Session, updateCommands []cartDomain.ItemUpdateCommand) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateItems")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -386,16 +456,105 @@ func (cs *CartService) UpdateItems(ctx context.Context, session *web.Session, up
 	cart, defers, err = behaviour.UpdateItems(ctx, cart, updateCommands)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
 
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
+		}
 		return err
 	}
 
 	return nil
 }
 
+// UpdateItemBundleConfig updates multiple item
+func (cs *CartService) UpdateItemBundleConfig(ctx context.Context, session *web.Session, updateCommand cartDomain.ItemUpdateCommand) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateItemBundleConfig")
+	defer span.End()
+
+	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
+	if err != nil {
+		return err
+	}
+
+	if updateCommand.BundleConfiguration == nil {
+		return ErrBundleConfigNotProvided
+	}
+
+	item, err := cart.GetByItemID(updateCommand.ItemID)
+	if err != nil {
+		return err
+	}
+
+	product, err := cs.productService.Get(ctx, item.MarketplaceCode)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemBundleConfig").Error(err)
+		}
+		return err
+	}
+
+	product, err = cs.getBundleWithActiveChoices(ctx, product, updateCommand.BundleConfiguration)
+	if err != nil {
+		return fmt.Errorf("error converting product to bundle: %w", err)
+	}
+
+	if cs.itemValidator != nil {
+		decoratedCart, _ := cs.cartReceiverService.DecorateCart(ctx, cart)
+		delivery, err := cart.GetDeliveryByItemID(updateCommand.ItemID)
+		if err != nil {
+			return fmt.Errorf("delivery code not found by item, while updating bundle: %w", err)
+		}
+
+		if err := cs.itemValidator.Validate(ctx, session, decoratedCart, delivery.DeliveryInfo.Code, cartDomain.AddRequest{}, product); err != nil {
+			return fmt.Errorf("error validating bundle update: %w", err)
+		}
+	}
+
+	// cart cache must be updated - with the current value of cart
+	var defers cartDomain.DeferEvents
+	defer func() {
+		cs.updateCartInCacheIfCacheIsEnabled(ctx, session, cart)
+		cs.dispatchAllEvents(ctx, defers)
+	}()
+
+	cart, defers, err = behaviour.UpdateItem(ctx, cart, updateCommand)
+	if err != nil {
+		cs.handleCartNotFound(session, err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "UpdateItemSourceId").Error(err)
+		}
+		return err
+	}
+
+	return nil
+}
+
+//nolint:wrapcheck // error wrapped in the code above, no need to wrap twice
+func (cs *CartService) getBundleWithActiveChoices(ctx context.Context, product productDomain.BasicProduct, bundleConfig productDomain.BundleConfiguration) (productDomain.BasicProduct, error) {
+	_, span := trace.StartSpan(ctx, "cart/CartService/getBundleWithActiveChoices")
+	defer span.End()
+
+	var err error
+
+	bundleProduct, ok := product.(productDomain.BundleProduct)
+	if !ok {
+		return nil, ErrProductNotTypeBundle
+	}
+
+	product, err = bundleProduct.GetBundleProductWithActiveChoices(bundleConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return product, nil
+}
+
 // DeleteItem in current cart
 func (cs *CartService) DeleteItem(ctx context.Context, session *web.Session, itemID string, deliveryCode string) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/DeleteItem")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -415,8 +574,9 @@ func (cs *CartService) DeleteItem(ctx context.Context, session *web.Session, ite
 
 	item, err := cart.GetByItemID(itemID)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteItem").Error(err)
-
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteItem").Error(err)
+		}
 		return err
 	}
 
@@ -424,8 +584,10 @@ func (cs *CartService) DeleteItem(ctx context.Context, session *web.Session, ite
 	cart, defers, err = behaviour.DeleteItem(ctx, cart, itemID, deliveryCode)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteItem").Error(errors.Wrap(err, "Trying to delete SKU :"+item.MarketplaceCode))
 
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteItem").Error(fmt.Errorf("trying to delete SKU %q: %w", item.MarketplaceCode, err))
+		}
 		return err
 	}
 
@@ -446,6 +608,9 @@ func (cs *CartService) DeleteItem(ctx context.Context, session *web.Session, ite
 
 // DeleteAllItems in current cart
 func (cs *CartService) DeleteAllItems(ctx context.Context, session *web.Session) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/DeleteAllItems")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -475,8 +640,10 @@ func (cs *CartService) DeleteAllItems(ctx context.Context, session *web.Session)
 			cart, defers, err = behaviour.DeleteItem(ctx, cart, item.ID, delivery.DeliveryInfo.Code)
 			if err != nil {
 				cs.handleCartNotFound(session, err)
-				cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteAllItems").Error(err)
 
+				if !errors.Is(err, context.Canceled) {
+					cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteAllItems").Error(err)
+				}
 				return err
 			}
 		}
@@ -489,6 +656,9 @@ func (cs *CartService) DeleteAllItems(ctx context.Context, session *web.Session)
 
 // CompleteCurrentCart and remove from cache
 func (cs *CartService) CompleteCurrentCart(ctx context.Context) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/CompleteCurrentCart")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, web.SessionFromContext(ctx))
 	if err != nil {
 		return nil, err
@@ -509,8 +679,10 @@ func (cs *CartService) CompleteCurrentCart(ctx context.Context) (*cartDomain.Car
 	completedCart, defers, err = completeBehaviour.Complete(ctx, cart)
 	if err != nil {
 		cs.handleCartNotFound(web.SessionFromContext(ctx), err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "CloseCurrentCart").Error(err)
 
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "CloseCurrentCart").Error(err)
+		}
 		return nil, err
 	}
 	cs.DeleteCartInCache(ctx, web.SessionFromContext(ctx), nil)
@@ -525,6 +697,9 @@ func (cs *CartService) CompleteCurrentCart(ctx context.Context) (*cartDomain.Car
 
 // RestoreCart and cache
 func (cs *CartService) RestoreCart(ctx context.Context, cart *cartDomain.Cart) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/RestoreCart")
+	defer span.End()
+
 	session := web.SessionFromContext(ctx)
 	behaviour, err := cs.cartReceiverService.ModifyBehaviour(ctx)
 	if err != nil {
@@ -548,8 +723,10 @@ func (cs *CartService) RestoreCart(ctx context.Context, cart *cartDomain.Cart) (
 
 	if err != nil {
 		cs.handleCartNotFound(web.SessionFromContext(ctx), err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "RestoreCart").Error(err)
 
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "RestoreCart").Error(err)
+		}
 		return nil, err
 	}
 
@@ -562,6 +739,9 @@ func (cs *CartService) RestoreCart(ctx context.Context, cart *cartDomain.Cart) (
 
 // Clean current cart
 func (cs *CartService) Clean(ctx context.Context, session *web.Session) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/Clean")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return err
@@ -592,7 +772,9 @@ func (cs *CartService) Clean(ctx context.Context, session *web.Session) error {
 
 	cart, defers, err = behaviour.CleanCart(ctx, cart)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteAllItems").Error(err)
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteAllItems").Error(err)
+		}
 		return err
 	}
 	// append deferred events of behaviour with changed qty events for every deleted item
@@ -603,6 +785,9 @@ func (cs *CartService) Clean(ctx context.Context, session *web.Session) error {
 
 // DeleteDelivery in current cart
 func (cs *CartService) DeleteDelivery(ctx context.Context, session *web.Session, deliveryCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/DeleteDelivery")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return nil, err
@@ -617,7 +802,10 @@ func (cs *CartService) DeleteDelivery(ctx context.Context, session *web.Session,
 
 	delivery, found := cart.GetDeliveryByCode(deliveryCode)
 	if !found {
-		return nil, errors.New("delivery not found: " + deliveryCode)
+		err = fmt.Errorf("%w: %s", cartDomain.ErrDeliveryCodeNotFound, deliveryCode)
+		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteDelivery").Info(err)
+
+		return nil, err
 	}
 	// we throw a qty changed event for every item in delivery// we throw a qty changed event for every item in delivery
 	for _, item := range delivery.Cartitems {
@@ -635,7 +823,9 @@ func (cs *CartService) DeleteDelivery(ctx context.Context, session *web.Session,
 
 	cart, defers, err = behaviour.CleanDelivery(ctx, cart, deliveryCode)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteAllItems").Error(err)
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "DeleteAllItems").Error(err)
+		}
 		return nil, err
 	}
 
@@ -646,7 +836,11 @@ func (cs *CartService) DeleteDelivery(ctx context.Context, session *web.Session,
 }
 
 // BuildAddRequest Helper to build
-func (cs *CartService) BuildAddRequest(_ context.Context, marketplaceCode string, variantMarketplaceCode string, qty int, additionalData map[string]string) cartDomain.AddRequest {
+// Deprecated: build your own add request
+func (cs *CartService) BuildAddRequest(ctx context.Context, marketplaceCode string, variantMarketplaceCode string, qty int, additionalData map[string]string) cartDomain.AddRequest {
+	_, span := trace.StartSpan(ctx, "cart/CartService/BuildAddRequest")
+	defer span.End()
+
 	if qty < 0 {
 		qty = 0
 	}
@@ -661,14 +855,18 @@ func (cs *CartService) BuildAddRequest(_ context.Context, marketplaceCode string
 
 // AddProduct adds a product to the cart
 func (cs *CartService) AddProduct(ctx context.Context, session *web.Session, deliveryCode string, addRequest cartDomain.AddRequest) (productDomain.BasicProduct, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/AddProduct")
+	defer span.End()
+
 	if deliveryCode == "" {
 		deliveryCode = cs.defaultDeliveryCode
 	}
 
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "AddProduct").Error(err)
-
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "AddProduct").Error(err)
+		}
 		return nil, err
 	}
 	// cart cache must be updated - with the current value of cart
@@ -680,7 +878,7 @@ func (cs *CartService) AddProduct(ctx context.Context, session *web.Session, del
 		cs.dispatchAllEvents(ctx, defers)
 	}()
 
-	addRequest, product, err := cs.checkProductForAddRequest(ctx, session, cart, deliveryCode, addRequest)
+	product, err := cs.checkProductForAddRequest(ctx, session, cart, deliveryCode, addRequest)
 
 	switch err.(type) {
 	case nil:
@@ -696,8 +894,9 @@ func (cs *CartService) AddProduct(ctx context.Context, session *web.Session, del
 
 	cart, err = cs.CreateInitialDeliveryIfNotPresent(ctx, session, deliveryCode)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "AddProduct").Error(err)
-
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "AddProduct").Error(err)
+		}
 		return nil, err
 	}
 
@@ -711,7 +910,10 @@ func (cs *CartService) AddProduct(ctx context.Context, session *web.Session, del
 	cart, defers, err = behaviour.AddToCart(ctx, cart, deliveryCode, addRequest)
 	if err != nil {
 		cs.handleCartNotFound(session, err)
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "AddProduct").Error(err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "AddProduct").Error(err)
+		}
 
 		return nil, err
 	}
@@ -731,6 +933,9 @@ func (cs *CartService) AddProduct(ctx context.Context, session *web.Session, del
 
 // CreateInitialDeliveryIfNotPresent creates the initial delivery
 func (cs *CartService) CreateInitialDeliveryIfNotPresent(ctx context.Context, session *web.Session, deliveryCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/CreateInitialDeliveryIfNotPresent")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return nil, err
@@ -765,6 +970,9 @@ func (cs *CartService) GetInitialDelivery(deliveryCode string) (*cartDomain.Deli
 
 // ApplyVoucher applies a voucher to the cart
 func (cs *CartService) ApplyVoucher(ctx context.Context, session *web.Session, couponCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ApplyVoucher")
+	defer span.End()
+
 	cart, behaviour, err := cs.getCartAndBehaviour(ctx, session, "ApplyVoucher")
 	if err != nil {
 		return nil, err
@@ -774,6 +982,9 @@ func (cs *CartService) ApplyVoucher(ctx context.Context, session *web.Session, c
 
 // ApplyAny applies a voucher or giftcard to the cart
 func (cs *CartService) ApplyAny(ctx context.Context, session *web.Session, anyCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ApplyAny")
+	defer span.End()
+
 	cart, behaviour, err := cs.getCartAndBehaviour(ctx, session, "ApplyAny")
 	if err != nil {
 		return nil, err
@@ -786,6 +997,9 @@ func (cs *CartService) ApplyAny(ctx context.Context, session *web.Session, anyCo
 
 // RemoveVoucher removes a voucher from the cart
 func (cs *CartService) RemoveVoucher(ctx context.Context, session *web.Session, couponCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/RemoveVoucher")
+	defer span.End()
+
 	cart, behaviour, err := cs.getCartAndBehaviour(ctx, session, "RemoveVoucher")
 	if err != nil {
 		return nil, err
@@ -795,6 +1009,9 @@ func (cs *CartService) RemoveVoucher(ctx context.Context, session *web.Session, 
 
 // ApplyGiftCard adds a giftcard to the cart
 func (cs *CartService) ApplyGiftCard(ctx context.Context, session *web.Session, couponCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ApplyGiftCard")
+	defer span.End()
+
 	cart, behaviour, err := cs.getCartAndBehaviour(ctx, session, "ApplyGiftCard")
 	if err != nil {
 		return nil, err
@@ -807,6 +1024,9 @@ func (cs *CartService) ApplyGiftCard(ctx context.Context, session *web.Session, 
 
 // RemoveGiftCard removes a giftcard from the cart
 func (cs *CartService) RemoveGiftCard(ctx context.Context, session *web.Session, couponCode string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/RemoveGiftCard")
+	defer span.End()
+
 	cart, behaviour, err := cs.getCartAndBehaviour(ctx, session, "RemoveGiftCard")
 	if err != nil {
 		return nil, err
@@ -819,9 +1039,14 @@ func (cs *CartService) RemoveGiftCard(ctx context.Context, session *web.Session,
 
 // Get current cart from session and corresponding behaviour
 func (cs *CartService) getCartAndBehaviour(ctx context.Context, session *web.Session, logKey string) (*cartDomain.Cart, cartDomain.ModifyBehaviour, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/getCartAndBehaviour")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, logKey).Error(err)
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, logKey).Error(err)
+		}
 
 		return nil, nil, err
 	}
@@ -831,6 +1056,9 @@ func (cs *CartService) getCartAndBehaviour(ctx context.Context, session *web.Ses
 // Executes provided behaviour regarding vouchers, this function serves to reduce duplicated code
 // for voucher / giftcard behaviour as their internal logic is basically the same
 func (cs *CartService) executeVoucherBehaviour(ctx context.Context, session *web.Session, cart *cartDomain.Cart, couponCode string, fn promotionFunc) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/executeVoucherBehaviour")
+	defer span.End()
+
 	// cart cache must be updated - with the current value of cart
 	var defers cartDomain.DeferEvents
 	defer func() {
@@ -842,44 +1070,64 @@ func (cs *CartService) executeVoucherBehaviour(ctx context.Context, session *web
 }
 
 func (cs *CartService) handleCartNotFound(session *web.Session, err error) {
-	if err == cartDomain.ErrCartNotFound {
+	if errors.Is(err, cartDomain.ErrCartNotFound) {
 		_ = cs.DeleteSavedSessionGuestCartID(session)
 	}
 }
 
 // checkProductForAddRequest existence and validate with productService
-func (cs *CartService) checkProductForAddRequest(ctx context.Context, session *web.Session, cart *cartDomain.Cart, deliveryCode string, addRequest cartDomain.AddRequest) (cartDomain.AddRequest, productDomain.BasicProduct, error) {
+func (cs *CartService) checkProductForAddRequest(ctx context.Context, session *web.Session, cart *cartDomain.Cart, deliveryCode string, addRequest cartDomain.AddRequest) (productDomain.BasicProduct, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/checkProductForAddRequest")
+	defer span.End()
+
 	product, err := cs.productService.Get(ctx, addRequest.MarketplaceCode)
 	if err != nil {
-		return addRequest, nil, err
+		return nil, err
 	}
 
 	if product.Type() == productDomain.TypeConfigurable {
 		if addRequest.VariantMarketplaceCode == "" {
-			return addRequest, nil, errors.New("no variant given for configurable product")
+			return nil, ErrNoVariantForConfigurable
 		}
 
 		configurableProduct := product.(productDomain.ConfigurableProduct)
 		if !configurableProduct.HasVariant(addRequest.VariantMarketplaceCode) {
-			return addRequest, nil, errors.New("product has not the given variant")
+			return nil, ErrVariantDoNotExist
 		}
 
 		product, err = configurableProduct.GetConfigurableWithActiveVariant(addRequest.VariantMarketplaceCode)
 		if err != nil {
-			return addRequest, nil, err
+			return nil, err
+		}
+	}
+
+	if product.Type() == productDomain.TypeBundle {
+		if len(addRequest.BundleConfiguration) == 0 {
+			return nil, ErrNoBundleConfigurationGiven
+		}
+
+		bundleProduct := product.(productDomain.BundleProduct)
+		domainBundleConfig := addRequest.BundleConfiguration
+
+		product, err = bundleProduct.GetBundleProductWithActiveChoices(domainBundleConfig)
+		if err != nil {
+			return nil, fmt.Errorf("error getting bundle with active choices: %w", err)
 		}
 	}
 
 	// Now Validate the Item with the optional registered ItemValidator
 	if cs.itemValidator != nil {
 		decoratedCart, _ := cs.cartReceiverService.DecorateCart(ctx, cart)
-		return addRequest, product, cs.itemValidator.Validate(ctx, session, decoratedCart, deliveryCode, addRequest, product)
+		return product, cs.itemValidator.Validate(ctx, session, decoratedCart, deliveryCode, addRequest, product)
 	}
 
-	return addRequest, product, nil
+	return product, nil
 }
 
 func (cs *CartService) checkProductQtyRestrictions(ctx context.Context, sess *web.Session, product productDomain.BasicProduct, cart *cartDomain.Cart, qtyToCheck int, deliveryCode string, itemID string) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/checkProductQtyRestrictions")
+	defer span.End()
+
 	restrictionResult := cs.restrictionService.RestrictQty(ctx, sess, product, cart, deliveryCode)
 
 	if restrictionResult.IsRestricted {
@@ -896,6 +1144,9 @@ func (cs *CartService) checkProductQtyRestrictions(ctx context.Context, sess *we
 }
 
 func (cs *CartService) updateCartInCacheIfCacheIsEnabled(ctx context.Context, session *web.Session, cart *cartDomain.Cart) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/updateCartInCacheIfCacheIsEnabled")
+	defer span.End()
+
 	if cs.cartCache != nil && cart != nil {
 		id, err := cs.cartCache.BuildIdentifier(ctx, session)
 		if err != nil {
@@ -915,6 +1166,9 @@ func (cs *CartService) updateCartInCacheIfCacheIsEnabled(ctx context.Context, se
 
 // DeleteCartInCache removes the cart from cache
 func (cs *CartService) DeleteCartInCache(ctx context.Context, session *web.Session, _ *cartDomain.Cart) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/DeleteCartInCache")
+	defer span.End()
+
 	if cs.cartCache != nil {
 		id, err := cs.cartCache.BuildIdentifier(ctx, session)
 		if err != nil {
@@ -922,7 +1176,7 @@ func (cs *CartService) DeleteCartInCache(ctx context.Context, session *web.Sessi
 		}
 
 		err = cs.cartCache.Delete(ctx, session, id)
-		if err == ErrNoCacheEntry {
+		if errors.Is(err, ErrNoCacheEntry) {
 			cs.logger.WithContext(ctx).Info("Cart in cache not found: %v", err)
 			return
 		}
@@ -936,6 +1190,9 @@ func (cs *CartService) DeleteCartInCache(ctx context.Context, session *web.Sessi
 // If the cart already holds a reserved order id no set/save is performed and the existing cart is returned.
 // You may want to use this before proceeding with payment to ensure having a useful reference in the payment processing
 func (cs *CartService) ReserveOrderIDAndSave(ctx context.Context, session *web.Session) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ReserveOrderIDAndSave")
+	defer span.End()
+
 	return cs.reserveOrderIDAndSave(ctx, session, false)
 }
 
@@ -943,10 +1200,16 @@ func (cs *CartService) ReserveOrderIDAndSave(ctx context.Context, session *web.S
 // Each call of this method reserves a new order ID, even if it is already set on the cart.
 // You may want to use this before proceeding with payment to ensure having a useful reference in the payment processing
 func (cs *CartService) ForceReserveOrderIDAndSave(ctx context.Context, session *web.Session) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/ForceReserveOrderIDAndSave")
+	defer span.End()
+
 	return cs.reserveOrderIDAndSave(ctx, session, true)
 }
 
 func (cs *CartService) reserveOrderIDAndSave(ctx context.Context, session *web.Session, force bool) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/reserveOrderIDAndSave")
+	defer span.End()
+
 	if cs.placeOrderService == nil {
 		return nil, errors.New("No placeOrderService registered")
 	}
@@ -978,11 +1241,17 @@ func (cs *CartService) reserveOrderIDAndSave(ctx context.Context, session *web.S
 
 // PlaceOrderWithCart converts the given cart with payments into orders by calling the Service
 func (cs *CartService) PlaceOrderWithCart(ctx context.Context, session *web.Session, cart *cartDomain.Cart, payment *placeorder.Payment) (placeorder.PlacedOrderInfos, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/PlaceOrderWithCart")
+	defer span.End()
+
 	return cs.placeOrder(ctx, session, cart, payment)
 }
 
 // PlaceOrder converts the cart (possibly cached) with payments into orders by calling the Service
 func (cs *CartService) PlaceOrder(ctx context.Context, session *web.Session, payment *placeorder.Payment) (placeorder.PlacedOrderInfos, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/PlaceOrder")
+	defer span.End()
+
 	cart, _, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return nil, err
@@ -991,6 +1260,9 @@ func (cs *CartService) PlaceOrder(ctx context.Context, session *web.Session, pay
 }
 
 func (cs *CartService) placeOrder(ctx context.Context, session *web.Session, cart *cartDomain.Cart, payment *placeorder.Payment) (placeorder.PlacedOrderInfos, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/placeOrder")
+	defer span.End()
+
 	if cs.placeOrderService == nil {
 		return nil, errors.New("No placeOrderService registered")
 	}
@@ -1019,6 +1291,9 @@ func (cs *CartService) placeOrder(ctx context.Context, session *web.Session, car
 
 // CancelOrder cancels a previously placed order and restores the cart content
 func (cs *CartService) CancelOrder(ctx context.Context, session *web.Session, orderInfos placeorder.PlacedOrderInfos, cart cartDomain.Cart) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/CancelOrder")
+	defer span.End()
+
 	err := cs.cancelOrder(ctx, session, orderInfos)
 	if err != nil {
 		return nil, err
@@ -1026,36 +1301,49 @@ func (cs *CartService) CancelOrder(ctx context.Context, session *web.Session, or
 
 	restoredCart, err := cs.RestoreCart(ctx, &cart)
 	if err != nil {
-		cs.logger.Error(fmt.Sprintf("couldn't restore cart err: %v", err))
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.Error(fmt.Sprintf("couldn't restore cart err: %v", err))
+		}
 		return nil, err
 	}
 
 	return restoredCart, nil
 }
 
-func (cs *CartService) cancelOrder(ctx context.Context, session *web.Session, orderInfos placeorder.PlacedOrderInfos) error {
+func (cs *CartService) cancelOrder(ctx context.Context, _ *web.Session, orderInfos placeorder.PlacedOrderInfos) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/cancelOrder")
+	defer span.End()
+
 	if cs.placeOrderService == nil {
 		return errors.New("No placeOrderService registered")
 	}
 
-	var cancelErr error
+	var err error
 
-	identitiy := cs.webIdentityService.Identify(ctx, web.RequestFromContext(ctx))
-	if identitiy != nil {
-		cancelErr = cs.placeOrderService.CancelCustomerOrder(ctx, orderInfos, identitiy)
+	identity := cs.webIdentityService.Identify(ctx, web.RequestFromContext(ctx))
+	if identity != nil {
+		err = cs.placeOrderService.CancelCustomerOrder(ctx, orderInfos, identity)
 	} else {
-		cancelErr = cs.placeOrderService.CancelGuestOrder(ctx, orderInfos)
+		err = cs.placeOrderService.CancelGuestOrder(ctx, orderInfos)
 	}
 
-	if cancelErr != nil {
-		cs.logger.Error(fmt.Sprintf("couldn't cancel order %q, err: %v", orderInfos, cancelErr))
-		return cancelErr
+	if err != nil {
+		err = fmt.Errorf("couldn't cancel order %q, err: %w", orderInfos, err)
+
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.Error(err)
+		}
+
+		return err
 	}
 	return nil
 }
 
 // CancelOrderWithoutRestore cancels a previously placed order
 func (cs *CartService) CancelOrderWithoutRestore(ctx context.Context, session *web.Session, orderInfos placeorder.PlacedOrderInfos) error {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/CancelOrderWithoutRestore")
+	defer span.End()
+
 	return cs.cancelOrder(ctx, session, orderInfos)
 }
 
@@ -1066,7 +1354,10 @@ func (cs *CartService) GetDefaultDeliveryCode() string {
 
 // handleEmptyDelivery - delete an empty delivery when found and feature flag is set
 func (cs *CartService) handleEmptyDelivery(ctx context.Context, session *web.Session, cart *cartDomain.Cart, deliveryCode string) {
-	if cs.deleteEmptyDelivery != true {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/handleEmptyDelivery")
+	defer span.End()
+
+	if !cs.deleteEmptyDelivery {
 		return
 	}
 
@@ -1085,12 +1376,17 @@ func (cs *CartService) handleEmptyDelivery(ctx context.Context, session *web.Ses
 
 	_, err := cs.DeleteDelivery(ctx, session, deliveryCode)
 	if err != nil {
-		cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "handleEmptyDelivery").Error(err)
+		if !errors.Is(err, context.Canceled) {
+			cs.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "handleEmptyDelivery").Error(err)
+		}
 		return
 	}
 }
 
 func (cs *CartService) dispatchAllEvents(ctx context.Context, events []flamingo.Event) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/dispatchAllEvents")
+	defer span.End()
+
 	for _, e := range events {
 		cs.eventRouter.Dispatch(ctx, e)
 	}
@@ -1098,6 +1394,9 @@ func (cs *CartService) dispatchAllEvents(ctx context.Context, events []flamingo.
 
 // AdjustItemsToRestrictedQty checks the quantity restrictions for each item of the cart and returns what quantities have been adjusted
 func (cs *CartService) AdjustItemsToRestrictedQty(ctx context.Context, session *web.Session) (QtyAdjustmentResults, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/AdjustItemsToRestrictedQty")
+	defer span.End()
+
 	qtyAdjustmentResults, err := cs.generateRestrictedQtyAdjustments(ctx, session)
 	if err != nil {
 		return nil, err
@@ -1132,6 +1431,9 @@ func (cs *CartService) AdjustItemsToRestrictedQty(ctx context.Context, session *
 
 // generateRestrictedQtyAdjustments checks the quantity restrictions for each item of the cart and returns which items should be adjusted and how
 func (cs *CartService) generateRestrictedQtyAdjustments(ctx context.Context, session *web.Session) (QtyAdjustmentResults, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/generateRestrictedQtyAdjustments")
+	defer span.End()
+
 	cart, _, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return nil, err
@@ -1145,12 +1447,14 @@ func (cs *CartService) generateRestrictedQtyAdjustments(ctx context.Context, ses
 				return nil, err
 			}
 
-			product, err = cs.getProductWithActiveVariantIfProductIsConfigurable(ctx, product, item.VariantMarketPlaceCode)
+			product, err = cs.getSpecificProductType(ctx, product, item.VariantMarketPlaceCode, item.BundleConfig)
 			if err != nil {
 				return nil, err
 			}
 
-			restrictionResult := cs.restrictionService.RestrictQty(ctx, session, product, cart, delivery.DeliveryInfo.Code)
+			itemContext := ContextWithItemID(ctx, item.ID)
+			restrictionResult := cs.restrictionService.RestrictQty(itemContext, session, product, cart, delivery.DeliveryInfo.Code)
+
 			if restrictionResult.RemainingDifference >= 0 {
 				continue
 			}
@@ -1171,9 +1475,13 @@ func (cs *CartService) generateRestrictedQtyAdjustments(ctx context.Context, ses
 	return result, nil
 }
 
-func (cs *CartService) getProductWithActiveVariantIfProductIsConfigurable(_ context.Context, product productDomain.BasicProduct, variantMarketplaceCode string) (productDomain.BasicProduct, error) {
+func (cs *CartService) getSpecificProductType(ctx context.Context, product productDomain.BasicProduct, variantMarketplaceCode string, bundleConfig productDomain.BundleConfiguration) (productDomain.BasicProduct, error) {
+	_, span := trace.StartSpan(ctx, "cart/CartService/getSpecificProductType")
+	defer span.End()
+
 	var err error
-	if product.Type() != productDomain.TypeConfigurable {
+
+	if product.Type() != productDomain.TypeConfigurable && product.Type() != productDomain.TypeBundle {
 		return product, nil
 	}
 
@@ -1184,6 +1492,13 @@ func (cs *CartService) getProductWithActiveVariantIfProductIsConfigurable(_ cont
 	if configurableProduct, ok := product.(productDomain.ConfigurableProduct); ok {
 		product, err = configurableProduct.GetConfigurableWithActiveVariant(variantMarketplaceCode)
 
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if bundleProduct, ok := product.(productDomain.BundleProduct); ok {
+		product, err = bundleProduct.GetBundleProductWithActiveChoices(bundleConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -1205,6 +1520,9 @@ func (qar QtyAdjustmentResults) HasRemovedCouponCodes() bool {
 
 // UpdateAdditionalData of cart
 func (cs *CartService) UpdateAdditionalData(ctx context.Context, session *web.Session, additionalData map[string]string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateAdditionalData")
+	defer span.End()
+
 	cart, behaviour, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return nil, err
@@ -1229,6 +1547,9 @@ func (cs *CartService) UpdateAdditionalData(ctx context.Context, session *web.Se
 
 // UpdateDeliveryAdditionalData of cart
 func (cs *CartService) UpdateDeliveryAdditionalData(ctx context.Context, session *web.Session, deliveryCode string, additionalData map[string]string) (*cartDomain.Cart, error) {
+	ctx, span := trace.StartSpan(ctx, "cart/CartService/UpdateDeliveryAdditionalData")
+	defer span.End()
+
 	cart, _, err := cs.cartReceiverService.GetCart(ctx, session)
 	if err != nil {
 		return nil, err

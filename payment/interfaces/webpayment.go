@@ -31,6 +31,6 @@ type (
 		OrderPaymentFromFlow(ctx context.Context, cart *cart.Cart, correlationID string) (*placeorder.Payment, error)
 
 		// CancelOrderPayment cancels the place order payment
-		CancelOrderPayment(ctx context.Context, cartPayment *placeorder.Payment) error
+		CancelOrderPayment(ctx context.Context, cartPayment *placeorder.Payment, reason domain.CancellationReason) error
 	}
 )

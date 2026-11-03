@@ -2,6 +2,10 @@ package product
 
 import (
 	"flamingo.me/dingo"
+	"flamingo.me/flamingo/v3/framework/flamingo"
+	"flamingo.me/flamingo/v3/framework/web"
+	"flamingo.me/graphql"
+
 	"flamingo.me/flamingo-commerce/v3/price"
 	"flamingo.me/flamingo-commerce/v3/product/domain"
 	"flamingo.me/flamingo-commerce/v3/product/infrastructure/fake"
@@ -9,9 +13,7 @@ import (
 	productgraphql "flamingo.me/flamingo-commerce/v3/product/interfaces/graphql"
 	"flamingo.me/flamingo-commerce/v3/product/interfaces/templatefunctions"
 	"flamingo.me/flamingo-commerce/v3/search"
-	"flamingo.me/flamingo/v3/framework/flamingo"
-	"flamingo.me/flamingo/v3/framework/web"
-	"flamingo.me/graphql"
+	"flamingo.me/flamingo-commerce/v3/search/interfaces/graphql/searchdto"
 )
 
 // Module represents the product module
@@ -47,6 +49,9 @@ func (m *Module) Configure(injector *dingo.Injector) {
 	}
 
 	injector.BindMulti(new(graphql.Service)).To(new(productgraphql.Service))
+	injector.BindMulti(new(searchdto.FacetMapper)).To(new(searchdto.ListFacetMapper))
+	injector.BindMulti(new(searchdto.FacetMapper)).To(new(searchdto.TreeFacetMapper))
+	injector.BindMulti(new(searchdto.FacetMapper)).To(new(searchdto.RangeFacetMapper))
 	if m.fakeService {
 		injector.Override((*domain.ProductService)(nil), "").To(fake.ProductService{}).In(dingo.ChildSingleton)
 		injector.Override((*domain.SearchService)(nil), "").To(fake.SearchService{}).In(dingo.ChildSingleton)
@@ -64,8 +69,15 @@ func (*Module) Depends() []dingo.Module {
 
 // CueConfig defines the product module configuration
 func (*Module) CueConfig() string {
+	// language=cue
 	return `
 commerce: {
+	SearchSorting :: {
+		key: string
+		label: string
+		asc?: string
+		desc?: string
+	}
 	product: {
 		view:  {
 			template: *"product/product" | !=""
@@ -75,10 +87,14 @@ commerce: {
 		slugAttributeCode: string | *"urlSlug"
 		fakeservice: {
 			enabled: bool | *false
-			currency: *"€" | !=""
+			currency: *"EUR" | !=""
+			defaultProducts: bool | *true
 			if enabled {
-			  jsonTestDataFolder?: string | !=""
+			  jsonTestDataFolder?: string & !=""
+			  jsonTestDataLiveSearch?: string & !=""
+			  sorting: [...SearchSorting]
 			}
+			deliveryCodes: [...string] | *["testCode1", "testCode2"]
 		}
 		api: {
 			enabled: bool | *true
@@ -98,9 +114,9 @@ func (r *routes) Inject(controller *controller.View) {
 
 func (r *routes) Routes(registry *web.RouterRegistry) {
 	registry.HandleGet("product.view", r.controller.Get)
-	h, _ := registry.Route("/product/:marketplacecode/:name.html", `product.view(marketplacecode, name, backurl?="")`)
+	h := registry.MustRoute("/product/:marketplacecode/:name.html", `product.view(marketplacecode, name, backurl?="")`)
 	h.Normalize("name")
-	h, _ = registry.Route("/product/:marketplacecode/:variantcode/:name.html", `product.view(marketplacecode, variantcode, name, backurl?="")`)
+	h = registry.MustRoute("/product/:marketplacecode/:variantcode/:name.html", `product.view(marketplacecode, variantcode, name, backurl?="")`)
 	h.Normalize("name")
 }
 
@@ -113,6 +129,6 @@ func (r *apiRoutes) Inject(apiController *controller.APIController) {
 }
 
 func (r *apiRoutes) Routes(registry *web.RouterRegistry) {
-	registry.Route("/api/v1/products/:marketplacecode", "products.api.get")
+	registry.MustRoute("/api/v1/products/:marketplacecode", "products.api.get")
 	registry.HandleGet("products.api.get", r.apiController.Get)
 }

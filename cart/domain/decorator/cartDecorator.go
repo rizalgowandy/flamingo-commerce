@@ -4,7 +4,9 @@ import (
 	"context"
 	"sort"
 
-	"flamingo.me/flamingo-commerce/v3/cart/domain/cart"
+	"go.opencensus.io/trace"
+
+	cartDomain "flamingo.me/flamingo-commerce/v3/cart/domain/cart"
 
 	"flamingo.me/flamingo/v3/framework/flamingo"
 
@@ -21,7 +23,7 @@ type (
 
 	// DecoratedCart Decorates Access To a Cart
 	DecoratedCart struct {
-		Cart                cart.Cart
+		Cart                cartDomain.Cart
 		DecoratedDeliveries []DecoratedDelivery
 		Ctx                 context.Context `json:"-"`
 		Logger              flamingo.Logger `json:"-"`
@@ -29,14 +31,14 @@ type (
 
 	// DecoratedDelivery Decorates a CartItem with its Product
 	DecoratedDelivery struct {
-		Delivery       cart.Delivery
+		Delivery       cartDomain.Delivery
 		DecoratedItems []DecoratedCartItem
 		logger         flamingo.Logger
 	}
 
 	// DecoratedCartItem Decorates a CartItem with its Product
 	DecoratedCartItem struct {
-		Item    cart.Item
+		Item    cartDomain.Item
 		Product domain.BasicProduct
 		logger  flamingo.Logger
 	}
@@ -46,6 +48,9 @@ type (
 		DecoratedItems []DecoratedCartItem
 		Group          string
 	}
+
+	cartCtxKey     struct{}
+	deliveryCtxKey struct{}
 )
 
 // Inject dependencies
@@ -58,54 +63,76 @@ func (df *DecoratedCartFactory) Inject(
 }
 
 // Create Factory method to get Decorated Cart
-func (df *DecoratedCartFactory) Create(ctx context.Context, Cart cart.Cart) *DecoratedCart {
-	decoratedCart := DecoratedCart{Cart: Cart, Logger: df.logger}
-	for _, d := range Cart.Deliveries {
+func (df *DecoratedCartFactory) Create(ctx context.Context, cart cartDomain.Cart) *DecoratedCart {
+	ctx, span := trace.StartSpan(ctx, "cart/DecoratedCartFactory/Create")
+	defer span.End()
+
+	decoratedCart := DecoratedCart{Cart: cart, Logger: df.logger}
+
+	contextWithCart := context.WithValue(ctx, cartCtxKey{}, cart)
+
+	for _, d := range cart.Deliveries {
+		contextWithDeliveryCode := ContextWithDeliveryCode(contextWithCart, d.DeliveryInfo.Code)
+
 		decoratedCart.DecoratedDeliveries = append(decoratedCart.DecoratedDeliveries, DecoratedDelivery{
 			Delivery:       d,
-			DecoratedItems: df.CreateDecorateCartItems(ctx, d.Cartitems),
+			DecoratedItems: df.CreateDecorateCartItems(contextWithDeliveryCode, d.Cartitems),
 			logger:         df.logger,
 		})
 	}
+
 	decoratedCart.Ctx = ctx
+
 	return &decoratedCart
 }
 
 // CreateDecorateCartItems Factory method to get Decorated Cart
-func (df *DecoratedCartFactory) CreateDecorateCartItems(ctx context.Context, items []cart.Item) []DecoratedCartItem {
+func (df *DecoratedCartFactory) CreateDecorateCartItems(ctx context.Context, items []cartDomain.Item) []DecoratedCartItem {
+	ctx, span := trace.StartSpan(ctx, "cart/DecoratedCartFactory/CreateDecorateCartItems")
+	defer span.End()
+
 	var decoratedItems []DecoratedCartItem
-	for _, cartitem := range items {
-		decoratedItem := df.decorateCartItem(ctx, cartitem)
+
+	for _, cartItem := range items {
+		decoratedItem := df.decorateCartItem(ctx, cartItem)
 		decoratedItems = append(decoratedItems, decoratedItem)
 	}
+
 	return decoratedItems
 }
 
 // decorateCartItem factory method
-func (df *DecoratedCartFactory) decorateCartItem(ctx context.Context, cartitem cart.Item) DecoratedCartItem {
-	decorateditem := DecoratedCartItem{Item: cartitem, logger: df.logger}
-	product, e := df.productService.Get(ctx, cartitem.MarketplaceCode)
-	if e != nil {
-		df.logger.WithContext(ctx).Error("cart.decorator - no product for item", e)
+func (df *DecoratedCartFactory) decorateCartItem(ctx context.Context, cartItem cartDomain.Item) DecoratedCartItem {
+	ctx, span := trace.StartSpan(ctx, "cart/DecoratedCartFactory/decorateCartItem")
+	defer span.End()
+
+	decoratedItem := DecoratedCartItem{Item: cartItem, logger: df.logger}
+
+	product, err := df.productService.Get(ctx, cartItem.MarketplaceCode)
+	if err != nil {
+		df.logger.WithContext(ctx).Debug("cart.decorator - no product for item: ", err)
+
 		if product == nil {
 			// To avoid errors if consumers want to access the product data
 			product = domain.SimpleProduct{
 				BasicProductData: domain.BasicProductData{
-					Title: cartitem.ProductName + "[outdated]",
+					Title: cartItem.ProductName + "[outdated]",
 				},
 			}
 
-			decorateditem.Product = product
+			decoratedItem.Product = product
 		}
-		return decorateditem
+
+		return decoratedItem
 	}
+
 	if product.Type() == domain.TypeConfigurable {
 		if configurable, ok := product.(domain.ConfigurableProduct); ok {
-			configurableWithVariant, err := configurable.GetConfigurableWithActiveVariant(cartitem.VariantMarketPlaceCode)
+			configurableWithVariant, err := configurable.GetConfigurableWithActiveVariant(cartItem.VariantMarketPlaceCode)
 			if err != nil {
 				product = domain.SimpleProduct{
 					BasicProductData: domain.BasicProductData{
-						Title: cartitem.ProductName + "[outdated]",
+						Title: cartItem.ProductName + "[outdated]",
 					},
 				}
 			} else {
@@ -113,8 +140,25 @@ func (df *DecoratedCartFactory) decorateCartItem(ctx context.Context, cartitem c
 			}
 		}
 	}
-	decorateditem.Product = product
-	return decorateditem
+
+	if product.Type() == domain.TypeBundle {
+		if bundle, ok := product.(domain.BundleProduct); ok {
+			bundleWithActiveChoices, err := bundle.GetBundleProductWithActiveChoices(cartItem.BundleConfig)
+			if err != nil {
+				product = domain.SimpleProduct{
+					BasicProductData: domain.BasicProductData{
+						Title: cartItem.ProductName + "[outdated]",
+					},
+				}
+			} else {
+				product = bundleWithActiveChoices
+			}
+		}
+	}
+
+	decoratedItem.Product = product
+
+	return decoratedItem
 }
 
 // IsConfigurable - checks if current CartItem is a Configurable Product
@@ -177,14 +221,15 @@ func (dci DecoratedCartItem) GetVariantsVariationAttributeCodes() []string {
 
 // GetChargesToPay getter
 func (dci DecoratedCartItem) GetChargesToPay(wishedToPaySum *domain.WishedToPay) priceDomain.Charges {
-	priceToPayForItem := dci.Item.RowPriceGrossWithDiscount()
+	priceToPayForItem := dci.Item.RowPriceGrossWithDiscount
 	return dci.Product.SaleableData().GetLoyaltyChargeSplit(&priceToPayForItem, wishedToPaySum, dci.Item.Qty)
 }
 
 // GetGroupedBy legacy function
 // deprecated: only here to support the old structure of accesing DecoratedItems in the Decorated Cart
 // Use instead:
-//		or iterate over DecoratedCart.DecoratedDelivery
+//
+//	or iterate over DecoratedCart.DecoratedDelivery
 func (dc DecoratedCart) GetGroupedBy(group string, sortGroup bool, params ...string) []*GroupedDecoratedCartItem {
 
 	if dc.Logger != nil {
@@ -278,4 +323,34 @@ func (dc DecoratedDelivery) GetDecoratedCartItemByID(ID string) *DecoratedCartIt
 		}
 	}
 	return nil
+}
+
+func CartFromDecoratedCartFactoryContext(ctx context.Context) *cartDomain.Cart {
+	ctx, span := trace.StartSpan(ctx, "cart/CartFromDecoratedCartFactoryContext")
+	defer span.End()
+
+	if cart, ok := ctx.Value(cartCtxKey{}).(cartDomain.Cart); ok {
+		return &cart
+	}
+
+	return nil
+}
+
+func DeliveryCodeFromDecoratedCartFactoryContext(ctx context.Context) string {
+	ctx, span := trace.StartSpan(ctx, "cart/DeliveryCodeFromDecoratedCartFactoryContext")
+	defer span.End()
+
+	if deliveryCode, ok := ctx.Value(deliveryCtxKey{}).(string); ok {
+		return deliveryCode
+	}
+
+	return ""
+}
+
+func ContextWithDeliveryCode(ctx context.Context, deliveryCode string) context.Context {
+	if _, ok := ctx.Value(deliveryCtxKey{}).(string); !ok {
+		return context.WithValue(ctx, deliveryCtxKey{}, deliveryCode)
+	}
+
+	return ctx
 }

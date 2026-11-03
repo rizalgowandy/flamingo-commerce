@@ -46,6 +46,9 @@ func (r *Redis) Inject(
 		Network                 string `inject:"config:commerce.checkout.placeorder.contextstore.redis.network"`
 		Address                 string `inject:"config:commerce.checkout.placeorder.contextstore.redis.address"`
 		Database                int    `inject:"config:commerce.checkout.placeorder.contextstore.redis.database"`
+		Username                string `inject:"config:commerce.checkout.placeorder.contextstore.redis.username,optional"`
+		Password                string `inject:"config:commerce.checkout.placeorder.contextstore.redis.password,optional"`
+		UseTLS                  bool   `inject:"config:commerce.checkout.placeorder.contextstore.redis.useTLS,optional"`
 		TTL                     string `inject:"config:commerce.checkout.placeorder.contextstore.redis.ttl"`
 	}) *Redis {
 	r.logger = logger
@@ -56,6 +59,22 @@ func (r *Redis) Inject(
 			panic("can't parse commerce.checkout.placeorder.contextstore.redis.ttl")
 		}
 
+		options := []redis.DialOption{
+			redis.DialDatabase(cfg.Database),
+		}
+
+		if cfg.Username != "" {
+			options = append(options, redis.DialUsername(cfg.Username))
+		}
+
+		if cfg.Password != "" {
+			options = append(options, redis.DialPassword(cfg.Password))
+		}
+
+		if cfg.UseTLS {
+			options = append(options, redis.DialUseTLS(cfg.UseTLS))
+		}
+
 		r.pool = &redis.Pool{
 			MaxIdle:     cfg.MaxIdle,
 			IdleTimeout: time.Duration(cfg.IdleTimeoutMilliseconds) * time.Millisecond,
@@ -64,7 +83,7 @@ func (r *Redis) Inject(
 				return err
 			},
 			Dial: func() (redis.Conn, error) {
-				return redis.Dial(cfg.Network, cfg.Address, redis.DialDatabase(cfg.Database))
+				return redis.Dial(cfg.Network, cfg.Address, options...)
 			},
 		}
 		runtime.SetFinalizer(r, func(r *Redis) { r.pool.Close() }) // close all connections on destruction
@@ -75,8 +94,9 @@ func (r *Redis) Inject(
 
 // Store a given context
 func (r *Redis) Store(ctx context.Context, key string, placeOrderContext process.Context) error {
-	_, span := trace.StartSpan(ctx, "placeorder/contextstore/Store")
+	_, span := trace.StartSpan(ctx, "checkout/Redis/Store")
 	defer span.End()
+
 	conn := r.pool.Get()
 	defer conn.Close()
 	if conn.Err() != nil {
@@ -101,8 +121,9 @@ func (r *Redis) Store(ctx context.Context, key string, placeOrderContext process
 
 // Get a stored context
 func (r *Redis) Get(ctx context.Context, key string) (process.Context, bool) {
-	_, span := trace.StartSpan(ctx, "placeorder/contextstore/Get")
+	_, span := trace.StartSpan(ctx, "checkout/Redis/Get")
 	defer span.End()
+
 	conn := r.pool.Get()
 	defer conn.Close()
 	if conn.Err() != nil {
@@ -127,8 +148,9 @@ func (r *Redis) Get(ctx context.Context, key string) (process.Context, bool) {
 
 // Delete a stored context, nop if it doesn't exist
 func (r *Redis) Delete(ctx context.Context, key string) error {
-	_, span := trace.StartSpan(ctx, "placeorder/contextstore/Delete")
+	_, span := trace.StartSpan(ctx, "checkout/Redis/Delete")
 	defer span.End()
+
 	conn := r.pool.Get()
 	defer conn.Close()
 	if conn.Err() != nil {

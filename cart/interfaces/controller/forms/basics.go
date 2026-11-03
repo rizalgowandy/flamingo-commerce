@@ -32,7 +32,7 @@ type (
 	}
 )
 
-//MapToDomainAddress - returns the cart Address Object
+// MapToDomainAddress - returns the cart Address Object
 func (a *AddressForm) MapToDomainAddress() cart.Address {
 	lines := make([]string, 2)
 	lines[0] = a.AddressLine1
@@ -56,11 +56,14 @@ func (a *AddressForm) MapToDomainAddress() cart.Address {
 		Country:                a.Country,
 		CountryCode:            a.CountryCode,
 		Email:                  a.Email,
+		TelephoneCountryCode:   a.PhoneCountryCode,
+		TelephoneAreaCode:      a.PhoneAreaCode,
+		TelephoneNumber:        a.PhoneNumber,
 		Telephone:              a.PhoneCountryCode + a.PhoneAreaCode + a.PhoneNumber,
 	}
 }
 
-//LoadFromCustomerAddress - fills the form from data in the address object (from customer module)
+// LoadFromCustomerAddress - fills the form from data in the address object (from customer module)
 func (a *AddressForm) LoadFromCustomerAddress(address domain.Address) {
 
 	if a.Email == "" || a.Email == "@" {
@@ -87,7 +90,7 @@ func (a *AddressForm) LoadFromCustomerAddress(address domain.Address) {
 
 }
 
-//LoadFromCartAddress - loads the form data from cart address
+// LoadFromCartAddress - loads the form data from cart address
 func (a *AddressForm) LoadFromCartAddress(address cart.Address) {
 	if address.Firstname != "" {
 		a.Firstname = address.Firstname
@@ -134,8 +137,22 @@ func (a *AddressForm) LoadFromCartAddress(address cart.Address) {
 		a.City = address.City
 	}
 
+	//nolint:staticcheck // deprecated since 10.08
 	if address.Telephone != "" {
 		a.PhoneNumber = address.Telephone
+	}
+
+	if address.TelephoneCountryCode != "" {
+		a.PhoneCountryCode = address.TelephoneCountryCode
+	}
+
+	if address.TelephoneAreaCode != "" {
+		a.PhoneAreaCode = address.TelephoneAreaCode
+	}
+
+	// Overrides if used new field
+	if address.TelephoneNumber != "" {
+		a.PhoneNumber = address.TelephoneNumber
 	}
 
 	if address.CountryCode != "" {

@@ -91,7 +91,7 @@ func (o *OfflineWebCartPaymentGateway) FlowStatus(ctx context.Context, cart *car
 	}, nil
 }
 
-//ConfirmResult nothing to confirm  for offline payment
+// ConfirmResult nothing to confirm  for offline payment
 func (o *OfflineWebCartPaymentGateway) ConfirmResult(ctx context.Context, cart *cartDomain.Cart, cartPayment *placeorder.Payment) error {
 	return nil
 }
@@ -122,6 +122,6 @@ func (o *OfflineWebCartPaymentGateway) OrderPaymentFromFlow(ctx context.Context,
 }
 
 // CancelOrderPayment nothing to cancel for offline payment
-func (o *OfflineWebCartPaymentGateway) CancelOrderPayment(ctx context.Context, cartPayment *placeorder.Payment) error {
+func (o *OfflineWebCartPaymentGateway) CancelOrderPayment(ctx context.Context, cartPayment *placeorder.Payment, _ domain.CancellationReason) error {
 	return nil
 }

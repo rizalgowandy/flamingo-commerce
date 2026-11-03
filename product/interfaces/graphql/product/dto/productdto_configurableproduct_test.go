@@ -3,10 +3,11 @@ package graphqlproductdto_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	priceDomain "flamingo.me/flamingo-commerce/v3/price/domain"
 	productDomain "flamingo.me/flamingo-commerce/v3/product/domain"
 	graphqlProductDto "flamingo.me/flamingo-commerce/v3/product/interfaces/graphql/product/dto"
-	"github.com/stretchr/testify/assert"
 )
 
 func getProductDomainConfigurableProduct() productDomain.ConfigurableProduct {
@@ -45,14 +46,14 @@ func getProductDomainConfigurableProduct() productDomain.ConfigurableProduct {
 					Code:      "attribute_a_code",
 					CodeLabel: "attribute_a_codeLabel",
 					Label:     "attribute_a_label",
-					RawValue:  nil,
+					RawValue:  "attribute_a_variantValue",
 					UnitCode:  "attribute_a_unitCode",
 				},
 				"attribute_b_code": {
 					Code:      "attribute_b_code",
 					CodeLabel: "attribute_b_codeLabel",
 					Label:     "attribute_b_label",
-					RawValue:  nil,
+					RawValue:  "attribute_b_variantValue",
 					UnitCode:  "attribute_b_unitCode",
 				},
 			},
@@ -68,8 +69,8 @@ func getProductDomainConfigurableProduct() productDomain.ConfigurableProduct {
 		},
 		VariantVariationAttributesSorting: map[string][]string{
 			"attribute_a_code": {
-				"attribute_a_variantLabel",
-				"attribute_b_variantLabel",
+				"attribute_a_variantValue",
+				"attribute_b_variantValue",
 			},
 		},
 		Variants: []productDomain.Variant{
@@ -81,14 +82,14 @@ func getProductDomainConfigurableProduct() productDomain.ConfigurableProduct {
 							Code:      "attribute_a_code",
 							CodeLabel: "attribute_a_codeLabel",
 							Label:     "attribute_a_variantLabel",
-							RawValue:  nil,
+							RawValue:  "attribute_a_variantValue",
 							UnitCode:  "attribute_a_unitCode",
 						},
 						"attribute_b_code": {
 							Code:      "attribute_b_code",
 							CodeLabel: "attribute_b_codeLabel",
 							Label:     "attribute_b_variantLabel",
-							RawValue:  nil,
+							RawValue:  "attribute_b_variantValue",
 							UnitCode:  "attribute_b_unitCode",
 						},
 					},
@@ -106,12 +107,14 @@ func getProductDomainConfigurableProduct() productDomain.ConfigurableProduct {
 			TeaserLoyaltyPriceInfo: &productDomain.LoyaltyPriceInfo{
 				Type:    "AwesomeLoyaltyProgram",
 				Default: priceDomain.NewFromFloat(500, "BonusPoints"),
+				Context: productDomain.PriceContext{
+					DeliveryCode: "ispu",
+				},
 			},
 			TeaserLoyaltyEarningInfo: &productDomain.LoyaltyEarningInfo{
 				Type:    "AwesomeLoyaltyProgram",
 				Default: priceDomain.NewFromFloat(23.23, "BonusPoints"),
 			},
-
 			Media: []productDomain.Media{
 				{
 					Type:      "teaser",
@@ -127,7 +130,7 @@ func getProductDomainConfigurableProduct() productDomain.ConfigurableProduct {
 
 func getConfigurableProduct() graphqlProductDto.Product {
 	product := getProductDomainConfigurableProduct()
-	return graphqlProductDto.NewGraphqlProductDto(product, nil)
+	return graphqlProductDto.NewGraphqlProductDto(product, nil, nil)
 }
 
 func TestConfigurableProduct_Attributes(t *testing.T) {
@@ -179,6 +182,9 @@ func TestConfigurableProduct_Loyalty(t *testing.T) {
 
 	assert.Equal(t, "AwesomeLoyaltyProgram", product.Loyalty().Earning.Type)
 	assert.Equal(t, "AwesomeLoyaltyProgram", product.Loyalty().Price.Type)
+	assert.Equal(t, "ispu", product.Loyalty().Price.Context.DeliveryCode)
+
+	assert.Empty(t, product.Loyalty().AvailablePrices)
 }
 
 func TestConfigurableProduct_MarketPlaceCode(t *testing.T) {
@@ -233,24 +239,6 @@ func TestConfigurableProduct_Title(t *testing.T) {
 func TestConfigurableProduct_Type(t *testing.T) {
 	product := getConfigurableProduct()
 	assert.Equal(t, productDomain.TypeConfigurable, product.Type())
-}
-
-func TestConfigurableProduct_VariationSelections(t *testing.T) {
-	configurableProduct := getProductDomainConfigurableProduct()
-	product := getConfigurableProduct().(graphqlProductDto.ConfigurableProduct)
-	assert.Equal(t, []graphqlProductDto.VariationSelection{
-		{
-			Code:  "attribute_a_code",
-			Label: "attribute_a_codeLabel",
-			Options: []graphqlProductDto.VariationSelectionOption{
-				{
-					Label:   "attribute_a_variantLabel",
-					State:   graphqlProductDto.VariationSelectionOptionStateMatch,
-					Variant: graphqlProductDto.NewVariationSelectionOptionVariant(configurableProduct.Variants[0]),
-				},
-			},
-		},
-	}, product.VariationSelections())
 }
 
 func TestConfigurableProduct_Badges(t *testing.T) {

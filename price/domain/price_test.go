@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/big"
 	"testing"
 
-	"flamingo.me/flamingo-commerce/v3/price/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"flamingo.me/flamingo-commerce/v3/price/domain"
 )
 
 func TestPrice_IsLessThen(t *testing.T) {
@@ -66,13 +68,79 @@ func TestPrice_Multiply(t *testing.T) {
 }
 
 func TestPrice_GetPayable(t *testing.T) {
-	price := domain.NewFromFloat(12.34567, "EUR")
+	t.Parallel()
 
-	payable := price.GetPayable()
-	assert.Equal(t, float64(12.35), payable.FloatAmount())
+	t.Run("rounding with valid currency code", func(t *testing.T) {
+		t.Parallel()
 
-	price = domain.NewFromFloat(math.MaxInt64, "EUR").GetPayable()
-	assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+		price := domain.NewFromFloat(12.34567, "EUR")
+
+		payable := price.GetPayable()
+		assert.Equal(t, float64(12.35), payable.FloatAmount())
+
+		price = domain.NewFromFloat(math.MaxInt64, "EUR").GetPayable()
+		assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+	})
+
+	t.Run("rounding with miles currency code for back compatibility", func(t *testing.T) {
+		t.Parallel()
+
+		price := domain.NewFromFloat(12.34567, "MILES")
+
+		payable := price.GetPayable()
+		assert.Equal(t, float64(12), payable.FloatAmount())
+
+		price = domain.NewFromFloat(math.MaxInt64, "MILES").GetPayable()
+		assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+	})
+
+	t.Run("rounding with points currency code for back compatibility", func(t *testing.T) {
+		t.Parallel()
+
+		price := domain.NewFromFloat(12.34567, "Points")
+
+		payable := price.GetPayable()
+		assert.Equal(t, float64(12), payable.FloatAmount())
+
+		price = domain.NewFromFloat(math.MaxInt64, "Points").GetPayable()
+		assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+	})
+
+	t.Run("rounding with random currency code", func(t *testing.T) {
+		t.Parallel()
+
+		price := domain.NewFromFloat(12.34567, "asdasdasd")
+
+		payable := price.GetPayable()
+		assert.Equal(t, float64(12), payable.FloatAmount())
+
+		price = domain.NewFromFloat(math.MaxInt64, "asdasdasd").GetPayable()
+		assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+	})
+
+	t.Run("rounding with Bahraini dinar currency code", func(t *testing.T) {
+		t.Parallel()
+
+		price := domain.NewFromFloat(12.34567, "BHD")
+
+		payable := price.GetPayable()
+		assert.Equal(t, 12.346, payable.FloatAmount())
+
+		price = domain.NewFromFloat(math.MaxInt64, "BHD").GetPayable()
+		assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+	})
+
+	t.Run("rounding with Chilean Unit of Account currency code", func(t *testing.T) {
+		t.Parallel()
+
+		price := domain.NewFromFloat(12.34567, "CLF")
+
+		payable := price.GetPayable()
+		assert.Equal(t, 12.3457, payable.FloatAmount())
+
+		price = domain.NewFromFloat(math.MaxInt64, "CLF").GetPayable()
+		assert.Equal(t, float64(math.MaxInt64), price.FloatAmount())
+	})
 }
 
 func TestNewFromInt(t *testing.T) {
@@ -139,17 +207,17 @@ func TestSumAll(t *testing.T) {
 }
 
 func TestPrice_TaxFromGross(t *testing.T) {
-	// 119 €
+	// 119 EUR
 	price := domain.NewFromInt(119, 1, "EUR")
 	tax := price.TaxFromGross(*new(big.Float).SetInt64(19))
 	assert.Equal(t, tax, domain.NewFromInt(19, 1, "EUR"))
 }
 
 func TestPrice_TaxFromNet(t *testing.T) {
-	// 100 €
+	// 100 EUR
 	price := domain.NewFromInt(100, 1, "EUR")
 	tax := price.TaxFromNet(*new(big.Float).SetInt64(19))
-	assert.Equal(t, tax, domain.NewFromInt(19, 1, "EUR"), "expect 19 € tax fromm 100€")
+	assert.Equal(t, tax, domain.NewFromInt(19, 1, "EUR"), "expect 19 EUR tax fromm 100EUR")
 
 	taxedPrice := price.Taxed(*new(big.Float).SetInt64(19))
 	assert.Equal(t, taxedPrice, domain.NewFromInt(119, 1, "EUR"))
@@ -196,30 +264,148 @@ func TestPrice_GetPayableByRoundingMode(t *testing.T) {
 	payable = price.GetPayableByRoundingMode(domain.RoundingModeFloor, 100)
 	assert.Equal(t, domain.NewFromInt(1234, 100, "EUR").Amount(), payable.Amount())
 
-	payable = price.GetPayableByRoundingMode(domain.RoundingModeHalfUp, 100)
-	assert.Equal(t, domain.NewFromInt(1235, 100, "EUR").Amount(), payable.Amount())
-
-	payable = price.GetPayableByRoundingMode(domain.RoundingModeHalfDown, 100)
-	assert.Equal(t, domain.NewFromInt(1234, 100, "EUR").Amount(), payable.Amount())
-
 	payable = price.GetPayableByRoundingMode(domain.RoundingModeFloor, 1)
 	assert.Equal(t, domain.NewFromInt(12, 1, "EUR").Amount(), payable.Amount())
-
-	price = domain.NewFromFloat(-0.0001, "EUR")
-	payable = price.GetPayableByRoundingMode(domain.RoundingModeHalfUp, 100)
-	assert.Equal(t, domain.NewFromInt(0, 1, "EUR").Amount(), payable.Amount())
-
-	price = domain.NewFromFloat(-0.12, "EUR")
-	payable = price.GetPayableByRoundingMode(domain.RoundingModeHalfUp, 100)
-	assert.EqualValues(t, domain.NewFromInt(-12, 100, "EUR").Amount(), payable.Amount())
 
 	price = domain.NewFromFloat(-0.119, "EUR")
 	payable = price.GetPayableByRoundingMode(domain.RoundingModeFloor, 100)
 	assert.Equal(t, domain.NewFromInt(-12, 100, "EUR").Amount(), payable.Amount())
+}
 
-	price = domain.NewFromFloat(-0.115, "EUR")
-	payable = price.GetPayableByRoundingMode(domain.RoundingModeHalfUp, 100)
-	assert.EqualValues(t, domain.NewFromInt(-11, 100, "EUR").Amount(), payable.Amount())
+func TestPrice_GetPayableByRoundingMode_RoundingModeCeil(t *testing.T) {
+	tests := []struct {
+		price     float64
+		precision int
+		expected  int64
+	}{
+		{price: 12.34567, precision: 100, expected: 1235},
+		{price: -12.34567, precision: 100, expected: -1234},
+		{price: 5.5, precision: 1, expected: 6},
+		{price: 2.5, precision: 1, expected: 3},
+		{price: 1.6, precision: 1, expected: 2},
+		{price: 1.1, precision: 1, expected: 2},
+		{price: 1.0, precision: 1, expected: 1},
+		{price: -1.0, precision: 1, expected: -1},
+		{price: -1.1, precision: 1, expected: -1},
+		{price: -1.6, precision: 1, expected: -1},
+		{price: -2.5, precision: 1, expected: -2},
+		{price: -5.5, precision: 1, expected: -5},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("rounding %f", tt.price), func(t *testing.T) {
+			price := domain.NewFromFloat(tt.price, "EUR")
+
+			payable := price.GetPayableByRoundingMode(domain.RoundingModeCeil, tt.precision)
+			assert.Equal(t, domain.NewFromInt(tt.expected, tt.precision, "EUR").Amount(), payable.Amount())
+		})
+	}
+}
+
+func TestPrice_GetPayableByRoundingMode_RoundingModeFloor(t *testing.T) {
+	tests := []struct {
+		price     float64
+		precision int
+		expected  int64
+	}{
+		{price: 12.34567, precision: 100, expected: 1234},
+		{price: -12.34567, precision: 100, expected: -1235},
+		{price: 5.5, precision: 1, expected: 5},
+		{price: 2.5, precision: 1, expected: 2},
+		{price: 1.6, precision: 1, expected: 1},
+		{price: 1.1, precision: 1, expected: 1},
+		{price: 1.0, precision: 1, expected: 1},
+		{price: -1.0, precision: 1, expected: -1},
+		{price: -1.1, precision: 1, expected: -2},
+		{price: -1.6, precision: 1, expected: -2},
+		{price: -2.5, precision: 1, expected: -3},
+		{price: -5.5, precision: 1, expected: -6},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("rounding %f", tt.price), func(t *testing.T) {
+			price := domain.NewFromFloat(tt.price, "EUR")
+
+			payable := price.GetPayableByRoundingMode(domain.RoundingModeFloor, tt.precision)
+			assert.Equal(t, domain.NewFromInt(tt.expected, tt.precision, "EUR").Amount(), payable.Amount())
+		})
+	}
+}
+
+func TestPrice_GetPayableByRoundingMode_RoundingModeHalfUp(t *testing.T) {
+	tests := []struct {
+		price     float64
+		precision int
+		expected  int64
+		msg       string
+	}{
+		{price: 7.6, precision: 1, expected: 8, msg: "7.6 should be rounded to 8"},
+		{price: 7.5, precision: 1, expected: 8, msg: "7.5 should be rounded to 8"},
+		{price: 7.4, precision: 1, expected: 7, msg: "7.4 should be rounded to 7"},
+		{price: 12.34567, precision: 100, expected: 1235, msg: "12.34567 should be rounded to 12.35"},
+		{price: -7.4, precision: 1, expected: -7, msg: "-7.4 should be rounded to -7"},
+		{price: -7.45, precision: 1, expected: -7, msg: "-7.45 should be rounded to -7"},
+		{price: -7.5, precision: 1, expected: -8, msg: "-7.5 should be rounded to -8"},
+		{price: -7.55, precision: 1, expected: -8, msg: "-7.55 should be rounded to -8"},
+		{price: -7.6, precision: 1, expected: -8, msg: "-7.6 should be rounded to -8"},
+
+		{price: 5.5, precision: 1, expected: 6, msg: "5.5 should be rounded to 6"},
+		{price: 2.5, precision: 1, expected: 3, msg: "2.5 should be rounded to 3"},
+		{price: 1.6, precision: 1, expected: 2, msg: "1.6 should be rounded to 2"},
+		{price: 1.1, precision: 1, expected: 1, msg: "1.1 should be rounded to 1"},
+		{price: 1.0, precision: 1, expected: 1, msg: "1.0 should be rounded to 1"},
+		{price: -1.0, precision: 1, expected: -1, msg: "-1.0 should be rounded to -1"},
+		{price: -1.1, precision: 1, expected: -1, msg: "-1.1 should be rounded to -1"},
+		{price: -1.6, precision: 1, expected: -2, msg: "-1.6 should be rounded to -2"},
+		{price: -2.5, precision: 1, expected: -3, msg: "-2.5 should be rounded to -3"},
+		{price: -5.5, precision: 1, expected: -6, msg: "-5.5 should be rounded to -6"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("rounding %f", tt.price), func(t *testing.T) {
+			price := domain.NewFromFloat(tt.price, "EUR")
+
+			payable := price.GetPayableByRoundingMode(domain.RoundingModeHalfUp, tt.precision)
+			assert.Equal(t, domain.NewFromInt(tt.expected, tt.precision, "EUR").Amount(), payable.Amount(), tt.msg)
+		})
+	}
+}
+
+func TestPrice_GetPayableByRoundingMode_RoundingModeHalfDown(t *testing.T) {
+	tests := []struct {
+		price     float64
+		precision int
+		expected  int64
+		msg       string
+	}{
+		{price: 7.6, precision: 1, expected: 8, msg: "7.6 should be rounded to 8"},
+		{price: 7.5, precision: 1, expected: 7, msg: "7.5 should be rounded to 7"},
+		{price: 7.4, precision: 1, expected: 7, msg: "7.4 should be rounded to 7"},
+		{price: 12.34567, precision: 100, expected: 1235, msg: "12.34567 should be rounded to 12.35"},
+
+		{price: -7.4, precision: 1, expected: -7, msg: "-7.4 should be rounded to -7"},
+		{price: -7.5, precision: 1, expected: -7, msg: "-7.5 should be rounded to -7"},
+		{price: -7.6, precision: 1, expected: -8, msg: "-7.6 should be rounded to -8"},
+
+		{price: 5.5, precision: 1, expected: 5, msg: "5.5 should be rounded to 5"},
+		{price: 2.5, precision: 1, expected: 2, msg: "2.5 should be rounded to 2"},
+		{price: 1.6, precision: 1, expected: 2, msg: "1.6 should be rounded to 2"},
+		{price: 1.1, precision: 1, expected: 1, msg: "1.1 should be rounded to 1"},
+		{price: 1.0, precision: 1, expected: 1, msg: "1.0 should be rounded to 1"},
+		{price: -1.0, precision: 1, expected: -1, msg: "-1.0 should be rounded to -1"},
+		{price: -1.1, precision: 1, expected: -1, msg: "-1.1 should be rounded to -1"},
+		{price: -1.6, precision: 1, expected: -2, msg: "-1.6 should be rounded to -2"},
+		{price: -2.5, precision: 1, expected: -2, msg: "-2.5 should be rounded to -2"},
+		{price: -5.5, precision: 1, expected: -5, msg: "-5.5 should be rounded to -5"},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("rounding %f", tt.price), func(t *testing.T) {
+			price := domain.NewFromFloat(tt.price, "EUR")
+
+			payable := price.GetPayableByRoundingMode(domain.RoundingModeHalfDown, tt.precision)
+			assert.Equal(t, domain.NewFromInt(tt.expected, tt.precision, "EUR").Amount(), payable.Amount(), tt.msg)
+		})
+	}
 
 }
 
@@ -263,13 +449,13 @@ func TestCharges_Add(t *testing.T) {
 
 func TestCharges_GetAllByType(t *testing.T) {
 	charges := domain.Charges{}
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-x", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-c", Reference: "HUHUWHHUHX", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "ABC123", Price: domain.NewFromInt(200, 1, "€")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-x", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-c", Reference: "HUHUWHHUHX", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "ABC123", Price: domain.NewFromInt(200, 1, "EUR")})
 
 	assert.Len(t, charges.GetAllByType(domain.ChargeTypeMain), 3)
 	assert.Len(t, charges.GetAllByType("type-a"), 1)
@@ -279,21 +465,22 @@ func TestCharges_GetAllByType(t *testing.T) {
 
 func TestCharges_GetByType(t *testing.T) {
 	charges := domain.Charges{}
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-x", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-c", Reference: "HUHUWHHUHX", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "ABC123", Price: domain.NewFromInt(200, 1, "€")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-x", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-c", Reference: "HUHUWHHUHX", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: "type-a", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "ABC123", Price: domain.NewFromInt(200, 1, "EUR")})
 
 	charge, found := charges.GetByType(domain.ChargeTypeMain)
 	assert.True(t, found)
-	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(600, 1, "€")})
+	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(600, 1, "EUR")})
 
 	charge, found = charges.GetByType("type-a")
 	assert.True(t, found)
-	want := domain.Charge{Type: "type-a", Price: domain.NewFromInt(400, 1, "€")}
+
+	want := domain.Charge{Type: "type-a", Price: domain.NewFromInt(400, 1, "EUR")}
 	assert.Equal(t, charge.Price, want.Price)
 }
 
@@ -303,21 +490,21 @@ func TestCharges_GetByTypeForced(t *testing.T) {
 	charge := charges.GetByTypeForced(domain.ChargeTypeMain)
 	assert.Equal(t, charge, domain.Charge{})
 
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
 	charge = charges.GetByTypeForced(domain.ChargeTypeMain)
 
-	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "€")})
+	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "EUR")})
 }
 
 func TestCharges_GetByChargeQualifier(t *testing.T) {
 	charges := domain.Charges{}
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "€")})
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "ABC123", Price: domain.NewFromInt(200, 1, "€")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Price: domain.NewFromInt(200, 1, "EUR")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "ABC123", Price: domain.NewFromInt(200, 1, "EUR")})
 
 	charge, found := charges.GetByChargeQualifier(domain.ChargeQualifier{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82"})
 	assert.True(t, found)
-	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
+	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
 
 }
 
@@ -326,9 +513,9 @@ func TestCharges_GetByChargeQualifierForced(t *testing.T) {
 	charge := charges.GetByChargeQualifierForced(domain.ChargeQualifier{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82"})
 	assert.Equal(t, charge, domain.Charge{})
 
-	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
+	charges = charges.AddCharge(domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
 	charge = charges.GetByChargeQualifierForced(domain.ChargeQualifier{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82"})
-	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "€")})
+	assert.Equal(t, charge, domain.Charge{Type: domain.ChargeTypeMain, Reference: "SJHHQWAXX6HJSDZ82", Price: domain.NewFromInt(200, 1, "EUR")})
 
 }
 

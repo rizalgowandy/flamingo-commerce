@@ -30,6 +30,11 @@ func (dc DecoratedCart) Cart() cart.Cart {
 	return dc.decoratedCart.Cart
 }
 
+// DecoratedCart – provides the cart
+func (dc DecoratedCart) DecoratedCart() *decorator.DecoratedCart {
+	return dc.decoratedCart
+}
+
 // DecoratedDeliveries – returns decorated deliveries
 func (dc DecoratedCart) DecoratedDeliveries() []DecoratedDelivery {
 	return mapDecoratedDeliveries(dc.decoratedCart.DecoratedDeliveries)
@@ -85,7 +90,7 @@ func mapDecoratedItems(decoratedItems []decorator.DecoratedCartItem) []Decorated
 	for _, di := range decoratedItems {
 		items = append(items, DecoratedCartItem{
 			Item:    di.Item,
-			Product: graphqlProductDto.NewGraphqlProductDto(di.Product, &di.Item.VariantMarketPlaceCode),
+			Product: graphqlProductDto.NewGraphqlProductDto(di.Product, &di.Item.VariantMarketPlaceCode, nil),
 		})
 	}
 

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/gob"
 	"fmt"
 	"math/big"
 	"strings"
@@ -8,6 +9,12 @@ import (
 
 	priceDomain "flamingo.me/flamingo-commerce/v3/price/domain"
 )
+
+func init() {
+	gob.Register(Specifications{})
+	gob.Register(SpecificationGroup{})
+	gob.Register(SpecificationEntry{})
+}
 
 // Media usage constants
 const (
@@ -63,7 +70,9 @@ type (
 
 		CategoryToCodeMapping []string
 
+		// Deprecated: use Stock[x].Level instead
 		StockLevel string
+		Stock      []Stock
 
 		Keywords []string
 		IsNew    bool
@@ -83,11 +92,12 @@ type (
 
 	// Saleable are properties required for being selled
 	Saleable struct {
-		IsSaleable      bool
-		SaleableFrom    time.Time
-		SaleableTo      time.Time
-		ActivePrice     PriceInfo
-		AvailablePrices []PriceInfo
+		IsSaleable         bool
+		SaleableFrom       time.Time
+		SaleableTo         time.Time
+		ActivePrice        PriceInfo
+		AvailablePrices    []PriceInfo
+		ActiveLoyaltyPrice *LoyaltyPriceInfo
 		// LoyaltyPrices holds optional infos for products that can be paid in a loyalty program
 		LoyaltyPrices []LoyaltyPriceInfo
 		// LoyaltyEarnings holds optional infos about potential loyalty earnings
@@ -134,6 +144,8 @@ type (
 		CustomerGroup string
 		ChannelCode   string
 		Locale        string
+		From          time.Time
+		To            time.Time
 	}
 
 	// TeaserData is the teaser-information for product previews
@@ -184,9 +196,9 @@ type (
 	Attribute struct {
 		// Code is the internal attribute identifier
 		Code string
-		// CodeLabel is the human readable (perhaps localized) attribute name
+		// CodeLabel is the human-readable (perhaps localized) attribute name
 		CodeLabel string
-		// Label is the human readable (perhaps localized) attribute value
+		// Label is the human-readable (perhaps localized) attribute value
 		Label string
 		// RawValue is the untouched original value of the attribute
 		RawValue interface{}
@@ -225,10 +237,22 @@ type (
 	Badge struct {
 		Code  string
 		Label string
+		// Color optional display color of the badge, e.g. a hex color like "#E30613"
+		Color *string
+		// Priority optional display priority of the badge, higher priorities should be displayed first
+		Priority *int
 	}
 
 	// Badges slice of Badge
 	Badges []Badge
+
+	// Stock holds data with product availability info
+	Stock struct {
+		InStock      bool
+		Level        string
+		Amount       int
+		DeliveryCode string
+	}
 )
 
 // Stock Level values
@@ -273,20 +297,48 @@ func (at Attribute) IsDisabledValue() bool {
 
 // HasMultipleValues checks for multiple raw values
 func (at Attribute) HasMultipleValues() bool {
-	_, ok := at.RawValue.([]interface{})
+	_, ok := at.RawValue.([]Attribute)
+	if ok {
+		return true
+	}
+
+	_, ok = at.RawValue.([]interface{})
 	return ok
 }
 
 // Values builds a list of product attribute values in case the raw value is a slice
 func (at Attribute) Values() []string {
 	var result []string
-	list, ok := at.RawValue.([]interface{})
+
+	list, ok := at.RawValue.([]Attribute)
 	if ok {
 		for _, entry := range list {
+			result = append(result, entry.Value())
+		}
+		return result
+	}
+
+	listFallback, ok := at.RawValue.([]interface{})
+	if ok {
+		for _, entry := range listFallback {
 			result = append(result, strings.Trim(fmt.Sprintf("%v", entry), " "))
 		}
 	}
 	return result
+}
+
+// Labels builds a list of human-readable product attribute values in case the raw value is a slice of Attribute, uses Values() as fallback
+func (at Attribute) Labels() []string {
+	var result []string
+	list, ok := at.RawValue.([]Attribute)
+	if ok {
+		for _, entry := range list {
+			result = append(result, entry.Label)
+		}
+		return result
+	}
+
+	return at.Values()
 }
 
 // HasUnitCode checks if a unit code is set on the attribute
@@ -364,26 +416,46 @@ func (bpd BasicProductData) GetMedia(usage string) Media {
 
 // IsSaleableNow checks flag and time
 func (p Saleable) IsSaleableNow() bool {
-	if p.IsSaleable == false {
+	if !p.IsSaleable {
 		return false
 	}
 
 	// For some reasons IsZero does not always work - thats why we check for 1970
-	if (p.SaleableFrom.IsZero() || p.SaleableFrom.Year() == 1970 || p.SaleableFrom.Before(time.Now())) &&
-		(p.SaleableTo.IsZero() || p.SaleableTo.Year() == 1970 || p.SaleableTo.After(time.Now())) {
+	if (p.SaleableFrom.IsZero() || p.SaleableFrom.UnixMilli() == 0 || p.SaleableFrom.Before(time.Now())) &&
+		(p.SaleableTo.IsZero() || p.SaleableTo.UnixMilli() == 0 || p.SaleableTo.After(time.Now())) {
 		return true
 	}
 
 	return false
 }
 
-// GetLoyaltyPriceByType returns the loyaltyentry that matches the type
+// IsSaleableBetween checks flag and time for the given range
+func (p Saleable) IsSaleableBetween(from time.Time, to time.Time) bool {
+	if !p.IsSaleable {
+		return false
+	}
+
+	// For some reasons IsZero does not always work - thats why we check for 1970
+	if (p.SaleableFrom.IsZero() || p.SaleableFrom.UnixMilli() == 0 || p.SaleableFrom.Before(to)) &&
+		(p.SaleableTo.IsZero() || p.SaleableTo.UnixMilli() == 0 || p.SaleableTo.After(from)) {
+		return true
+	}
+
+	return false
+}
+
+// GetLoyaltyPriceByType returns first encountered loyalty price with this type
 func (p Saleable) GetLoyaltyPriceByType(ltype string) (*LoyaltyPriceInfo, bool) {
+	if p.ActiveLoyaltyPrice != nil && p.ActiveLoyaltyPrice.Type == ltype {
+		return p.ActiveLoyaltyPrice, true
+	}
+
 	for _, lp := range p.LoyaltyPrices {
 		if lp.Type == ltype {
 			return &lp, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -405,90 +477,97 @@ func (p Saleable) generateLoyaltyChargeSplit(valuedPriceToPay *priceDomain.Price
 	requiredCharges := make(map[string]priceDomain.Charge)
 	remainingMainChargeValue := valuedPriceToPay.Amount()
 
-	// getLoyaltyCharge - private func that returns the loyaltyCharge of the given type. making sure the currentlyRemainingMainChargeValue is not exceeded
-	getValidLoyaltyCharge := func(loyaltyAmountWishedToSpent big.Float, loyaltyPrice LoyaltyPriceInfo, chargeType string, currentlyRemainingMainChargeValue *big.Float) priceDomain.Charge {
-		loyaltyCurrency := loyaltyPrice.GetFinalPrice().Currency()
-		rateLoyaltyFinalPriceToRealFinalPrice := loyaltyPrice.GetRate(p.ActivePrice.GetFinalPrice())
-		maximumPossibleLoyaltyValue := big.NewFloat(0.0)
-		if currentlyRemainingMainChargeValue.Cmp(big.NewFloat(0.0)) != 0 {
-			maximumPossibleLoyaltyValue = new(big.Float).Quo(currentlyRemainingMainChargeValue, &rateLoyaltyFinalPriceToRealFinalPrice)
-		}
-
-		maximumPossibleLoyaltyPrice := priceDomain.NewFromBigFloat(*maximumPossibleLoyaltyValue, loyaltyCurrency).GetPayable()
-
-		if loyaltyAmountWishedToSpent.Cmp(maximumPossibleLoyaltyValue) > 0 {
-			loyaltyAmountWishedToSpent = *maximumPossibleLoyaltyValue
-		}
-		valuedLoyalityPrice := priceDomain.NewFromBigFloat(*new(big.Float).Mul(&rateLoyaltyFinalPriceToRealFinalPrice, &loyaltyAmountWishedToSpent), valuedPriceToPay.Currency()).GetPayable()
-		if maximumPossibleLoyaltyPrice.Amount().Cmp(&loyaltyAmountWishedToSpent) == 0 {
-			// If the wish equals the rounded maximum - we need to use the complete remaining value
-			valuedLoyalityPrice = priceDomain.NewFromBigFloat(*currentlyRemainingMainChargeValue, valuedPriceToPay.Currency())
-		}
-		return priceDomain.Charge{
-			Price: priceDomain.NewFromBigFloat(loyaltyAmountWishedToSpent, loyaltyCurrency).GetPayable(),
-			Type:  chargeType,
-			Value: valuedLoyalityPrice,
-		}
+	if p.ActiveLoyaltyPrice == nil || !p.ActiveLoyaltyPrice.GetFinalPrice().IsPositive() {
+		return buildCharges(requiredCharges, *remainingMainChargeValue, *valuedPriceToPay)
 	}
 
-	for _, loyaltyPrice := range p.LoyaltyPrices {
-		chargeType := loyaltyPrice.Type
-		if chargeType == "" {
-			continue
-		}
+	// loyaltyAmountToSpent - set as default without potential wish the minimum
+	loyaltyAmountToSpent := p.ActiveLoyaltyPrice.getMin(qty)
 
-		if !loyaltyPrice.GetFinalPrice().IsPositive() {
-			continue
-		}
+	// check if the minimum points should be ignored, if so minimum will be set to 0
+	if ignoreMin {
+		loyaltyAmountToSpent = *big.NewFloat(0.0)
+	}
 
-		// loyaltyAmountToSpent - set as default without potential wish the minimum
-		loyaltyAmountToSpent := loyaltyPrice.getMin(qty)
+	//nolint:nestif // to be refactored some other day
+	if loyaltyPointsWishedToPay != nil {
+		// if a loyaltyPointsWishedToPay is passed evaluate it within min and max and update loyaltyAmountToSpent:
+		wishedPrice := loyaltyPointsWishedToPay.GetByType(p.ActiveLoyaltyPrice.Type)
 
-		// check if the minimum points should be ignored, if so minimum will be set to 0
-		if ignoreMin {
-			loyaltyAmountToSpent = *big.NewFloat(0.0)
-		}
+		if wishedPrice != nil && wishedPrice.Currency() == p.ActiveLoyaltyPrice.GetFinalPrice().Currency() {
+			wishedPriceRounded := wishedPrice.GetPayable()
 
-		if loyaltyPointsWishedToPay != nil {
-			// if a loyaltyPointsWishedToPay is passed evaluate it within min and max and update loyaltyAmountToSpent:
-			wishedPrice := loyaltyPointsWishedToPay.GetByType(chargeType)
-
-			if wishedPrice != nil && wishedPrice.Currency() == loyaltyPrice.GetFinalPrice().Currency() {
-				wishedPriceRounded := wishedPrice.GetPayable()
-
-				// if wish is bigger than min we using the wish
-				if loyaltyAmountToSpent.Cmp(wishedPriceRounded.Amount()) <= 0 {
-					loyaltyAmountToSpent = *wishedPriceRounded.Amount()
-				}
-				// evaluate max
-				max := loyaltyPrice.getMax(qty)
-				if max != nil {
-					// more then max - return max
-					if max.Cmp(wishedPrice.Amount()) == -1 {
-						loyaltyAmountToSpent = *max
-					}
+			// if wish is bigger than min we using the wish
+			if loyaltyAmountToSpent.Cmp(wishedPriceRounded.Amount()) <= 0 {
+				loyaltyAmountToSpent = *wishedPriceRounded.Amount()
+			}
+			// evaluate maxPrice
+			maxPrice := p.ActiveLoyaltyPrice.getMax(qty)
+			if maxPrice != nil {
+				// more then maxPrice - return maxPrice
+				if maxPrice.Cmp(wishedPrice.Amount()) == -1 {
+					loyaltyAmountToSpent = *maxPrice
 				}
 			}
 		}
-
-		loyaltyCharge := getValidLoyaltyCharge(loyaltyAmountToSpent, loyaltyPrice, chargeType, remainingMainChargeValue)
-
-		if !loyaltyCharge.Value.IsPositive() {
-			continue
-		}
-
-		// Add the loyalty charge and at the same time reduce the remainingValue
-		remainingMainChargeValue = new(big.Float).Sub(remainingMainChargeValue, loyaltyCharge.Value.Amount())
-		requiredCharges[chargeType] = loyaltyCharge
 	}
 
-	remainingMainChargePrice := priceDomain.NewFromBigFloat(*remainingMainChargeValue, valuedPriceToPay.Currency()).GetPayable()
+	loyaltyCharge := getValidLoyaltyCharge(loyaltyAmountToSpent, *p.ActiveLoyaltyPrice, p.ActivePrice, *valuedPriceToPay)
+
+	if !loyaltyCharge.Value.IsPositive() {
+		return buildCharges(requiredCharges, *remainingMainChargeValue, *valuedPriceToPay)
+	}
+
+	// Add the loyalty charge and at the same time reduce the remainingValue
+	remainingMainChargeValue = new(big.Float).Sub(remainingMainChargeValue, loyaltyCharge.Value.Amount())
+	requiredCharges[p.ActiveLoyaltyPrice.Type] = loyaltyCharge
+
+	return buildCharges(requiredCharges, *remainingMainChargeValue, *valuedPriceToPay)
+}
+
+func buildCharges(requiredCharges map[string]priceDomain.Charge, remainingMainChargeValue big.Float, valuedPriceToPay priceDomain.Price) priceDomain.Charges {
+	remainingMainChargePrice := priceDomain.NewFromBigFloat(remainingMainChargeValue, valuedPriceToPay.Currency()).GetPayable()
+
 	requiredCharges[priceDomain.ChargeTypeMain] = priceDomain.Charge{
 		Price: remainingMainChargePrice,
 		Type:  priceDomain.ChargeTypeMain,
 		Value: remainingMainChargePrice,
 	}
+
 	return *priceDomain.NewCharges(requiredCharges)
+}
+
+// getValidLoyaltyCharge returns the loyaltyCharge of the given type, making sure the currentlyRemainingMainChargeValue is not exceeded
+func getValidLoyaltyCharge(loyaltyAmountWishedToSpent big.Float, activeLoyaltyPrice LoyaltyPriceInfo, activePrice PriceInfo, valuedPriceToPay priceDomain.Price) priceDomain.Charge {
+	currentlyRemainingMainChargeValue := valuedPriceToPay.Amount()
+
+	loyaltyCurrency := activeLoyaltyPrice.GetFinalPrice().Currency()
+	rateLoyaltyFinalPriceToRealFinalPrice := activeLoyaltyPrice.GetRate(activePrice.GetFinalPrice())
+	maximumPossibleLoyaltyValue := big.NewFloat(0.0)
+
+	if currentlyRemainingMainChargeValue.Cmp(big.NewFloat(0.0)) != 0 {
+		remainingPrice := valuedPriceToPay.GetPayable()
+		maximumPossibleLoyaltyValue = new(big.Float).Quo(remainingPrice.Amount(), &rateLoyaltyFinalPriceToRealFinalPrice)
+		maximumPossibleLoyaltyValue = priceDomain.NewFromBigFloat(*maximumPossibleLoyaltyValue, "").GetPayableByRoundingMode(priceDomain.RoundingModeHalfUp, 1).Amount()
+	}
+
+	maximumPossibleLoyaltyPrice := priceDomain.NewFromBigFloat(*maximumPossibleLoyaltyValue, loyaltyCurrency).GetPayable()
+
+	if loyaltyAmountWishedToSpent.Cmp(maximumPossibleLoyaltyValue) > 0 {
+		loyaltyAmountWishedToSpent = *maximumPossibleLoyaltyValue
+	}
+
+	valuedLoyaltyPrice := priceDomain.NewFromBigFloat(*new(big.Float).Mul(&rateLoyaltyFinalPriceToRealFinalPrice, &loyaltyAmountWishedToSpent), valuedPriceToPay.Currency()).GetPayable()
+	if maximumPossibleLoyaltyPrice.Amount().Cmp(&loyaltyAmountWishedToSpent) == 0 {
+		// If the wish equals the rounded maximum - we need to use the complete remaining value
+		valuedLoyaltyPrice = priceDomain.NewFromBigFloat(*currentlyRemainingMainChargeValue, valuedPriceToPay.Currency())
+	}
+
+	return priceDomain.Charge{
+		Price: priceDomain.NewFromBigFloat(loyaltyAmountWishedToSpent, loyaltyCurrency).GetPayable(),
+		Type:  activeLoyaltyPrice.Type,
+		Value: valuedLoyaltyPrice,
+	}
 }
 
 // GetLoyaltyChargeSplit gets the Charges that need to be paid by type:
@@ -542,11 +621,28 @@ func findMediaInProduct(p BasicProduct, group string, usage string) *Media {
 
 // IsInStock returns information if current product whether in stock or not
 func (bpd BasicProductData) IsInStock() bool {
+	for _, stock := range bpd.Stock {
+		if stock.InStock {
+			return true
+		}
+	}
+
 	if bpd.StockLevel == "" || bpd.StockLevel == StockLevelOutOfStock {
 		return false
 	}
 
 	return true
+}
+
+// IsInStockForDeliveryCode returns information if current product whether in stock or not for provided delivery code
+func (bpd BasicProductData) IsInStockForDeliveryCode(deliveryCode string) bool {
+	for _, stock := range bpd.Stock {
+		if stock.DeliveryCode == deliveryCode {
+			return stock.InStock
+		}
+	}
+
+	return false
 }
 
 // NewWishedToPay returns a new WishedToPay struct
@@ -578,7 +674,8 @@ func (l LoyaltyPriceInfo) GetRate(valuedPrice priceDomain.Price) big.Float {
 	if !l.GetFinalPrice().IsPositive() {
 		return *big.NewFloat(0)
 	}
-	return *new(big.Float).Quo(valuedPrice.Amount(), l.GetFinalPrice().Amount())
+
+	return *new(big.Float).Quo(valuedPrice.GetPayable().Amount(), l.GetFinalPrice().Amount())
 }
 
 // HasMax checks if product has a maximum (points to spend) restriction
@@ -667,7 +764,7 @@ func (c *CategoryTeaser) CPath() string {
 
 // First of the badges, returns nil if there is no first badge
 func (b Badges) First() *Badge {
-	if 0 == len(b) {
+	if len(b) == 0 {
 		return nil
 	}
 

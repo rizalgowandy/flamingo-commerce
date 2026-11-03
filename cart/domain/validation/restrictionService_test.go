@@ -2,7 +2,6 @@ package validation_test
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -23,7 +22,7 @@ type MockRestrictor struct {
 }
 
 func (r *MockRestrictor) Name() string {
-	return fmt.Sprintf("MockRestrictor")
+	return "MockRestrictor"
 }
 
 func (r *MockRestrictor) Restrict(ctx context.Context, session *web.Session, product domain.BasicProduct, currentCart *cart.Cart, deliveryCode string) *validation.RestrictionResult {
@@ -87,7 +86,11 @@ func TestRestrictionService_RestrictQty(t *testing.T) {
 			fields: fields{
 				qtyRestrictors: []validation.MaxQuantityRestrictor{&MockRestrictor{IsRestricted: true, MaxQty: 5, DifferenceQty: 5}},
 			},
-			args: args{},
+			args: args{
+				ctx:     context.Background(),
+				product: nil,
+				cart:    nil,
+			},
 			expectedRestrictionResult: &validation.RestrictionResult{
 				IsRestricted:        true,
 				MaxAllowed:          5,
@@ -106,7 +109,11 @@ func TestRestrictionService_RestrictQty(t *testing.T) {
 					&MockRestrictor{IsRestricted: true, MaxQty: math.MaxInt32, DifferenceQty: math.MaxInt32},
 				},
 			},
-			args: args{},
+			args: args{
+				ctx:     context.Background(),
+				product: nil,
+				cart:    nil,
+			},
 			expectedRestrictionResult: &validation.RestrictionResult{
 				IsRestricted:        true,
 				MaxAllowed:          17,

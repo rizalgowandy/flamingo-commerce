@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"net/url"
 
+	"flamingo.me/flamingo/v3/framework/flamingo"
+	"flamingo.me/flamingo/v3/framework/web"
+
 	"flamingo.me/flamingo-commerce/v3/product/domain"
 	"flamingo.me/flamingo-commerce/v3/search/application"
 	searchdomain "flamingo.me/flamingo-commerce/v3/search/domain"
 	"flamingo.me/flamingo-commerce/v3/search/utils"
-	"flamingo.me/flamingo/v3/framework/flamingo"
-	"flamingo.me/flamingo/v3/framework/web"
 )
 
 type (
@@ -30,6 +31,7 @@ type (
 		Facets         searchdomain.FacetCollection
 		PaginationInfo utils.PaginationInfo
 		Promotions     []searchdomain.Promotion
+		Actions        []searchdomain.Action
 	}
 )
 
@@ -102,6 +104,7 @@ func (s *ProductSearchService) Find(ctx context.Context, searchRequest *applicat
 		Products:       result.Hits,
 		PaginationInfo: paginationInfo,
 		Promotions:     result.Promotions,
+		Actions:        result.Actions,
 	}, nil
 }
 
@@ -153,5 +156,6 @@ func (s *ProductSearchService) FindBy(ctx context.Context, attributeCode string,
 		Products:       result.Hits,
 		PaginationInfo: paginationInfo,
 		Promotions:     result.Result.Promotions,
+		Actions:        result.Actions,
 	}, nil
 }

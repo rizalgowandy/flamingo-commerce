@@ -6,6 +6,11 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	cartDomain "flamingo.me/flamingo-commerce/v3/cart/domain/cart"
 	"flamingo.me/flamingo-commerce/v3/checkout/application/placeorder"
 	"flamingo.me/flamingo-commerce/v3/checkout/domain/placeorder/process"
@@ -15,10 +20,6 @@ import (
 	"flamingo.me/flamingo-commerce/v3/payment/interfaces"
 	"flamingo.me/flamingo-commerce/v3/payment/interfaces/mocks"
 	price "flamingo.me/flamingo-commerce/v3/price/domain"
-	"github.com/google/go-cmp/cmp"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
 func provideProcessFactory(t *testing.T) *process.Factory {
@@ -184,14 +185,18 @@ func TestPaymentValidator(t *testing.T) {
 					Status: domain.PaymentFlowStatusUnapproved,
 					Action: domain.PaymentFlowActionTriggerClientSDK,
 					ActionData: domain.FlowActionData{
-						URL: &url.URL{Scheme: "https", Host: "redirect-url.com"},
+						URL:         &url.URL{Scheme: "https", Host: "redirect-url.com"},
+						DisplayData: `{"foo": "bar"}`,
 					},
 				},
 			},
 			want: want{
 				runResult: process.RunResult{Failed: nil},
 				state:     states.TriggerClientSDK{}.Name(),
-				stateData: process.StateData(&url.URL{Scheme: "https", Host: "redirect-url.com"}),
+				stateData: process.StateData(states.TriggerClientSDKData{
+					URL:  &url.URL{Scheme: "https", Host: "redirect-url.com"},
+					Data: `{"foo": "bar"}`,
+				}),
 			},
 		},
 		{
@@ -361,7 +366,7 @@ func TestPaymentValidator(t *testing.T) {
 				},
 			},
 			want: want{
-				runResult: process.RunResult{Failed: process.PaymentCanceledByCustomerReason{}},
+				runResult: process.RunResult{Failed: process.PaymentCanceledByCustomerReason{PaymentCancellationReason: domain.CancellationReasonAbortedByCustomer}},
 				state:     states.New{}.Name(),
 			},
 		},
@@ -373,7 +378,20 @@ func TestPaymentValidator(t *testing.T) {
 				},
 			},
 			want: want{
-				runResult: process.RunResult{Failed: process.PaymentErrorOccurredReason{}},
+				runResult: process.RunResult{Failed: process.PaymentErrorOccurredReason{Error: placeorder.ValidatePaymentErrorStatusCancelled}},
+				state:     states.New{}.Name(),
+			},
+		},
+		{
+			name: "status: cancelled with error details",
+			flowStatus: flowStatusResult{
+				flowStatus: &domain.FlowStatus{
+					Status: domain.PaymentFlowStatusCancelled,
+					Error:  &domain.Error{ErrorMessage: "this flow has been cancelled", ErrorCode: "cancelledcode"},
+				},
+			},
+			want: want{
+				runResult: process.RunResult{Failed: process.PaymentErrorOccurredReason{Error: placeorder.ValidatePaymentErrorStatusCancelled}},
 				state:     states.New{}.Name(),
 			},
 		},
@@ -385,7 +403,20 @@ func TestPaymentValidator(t *testing.T) {
 				},
 			},
 			want: want{
-				runResult: process.RunResult{Failed: process.PaymentErrorOccurredReason{}},
+				runResult: process.RunResult{Failed: process.PaymentErrorOccurredReason{Error: placeorder.ValidatePaymentErrorStatusFailed}},
+				state:     states.New{}.Name(),
+			},
+		},
+		{
+			name: "status: failed with error details",
+			flowStatus: flowStatusResult{
+				flowStatus: &domain.FlowStatus{
+					Status: domain.PaymentFlowStatusFailed,
+					Error:  &domain.Error{ErrorMessage: "this flow failed", ErrorCode: "failedcode"},
+				},
+			},
+			want: want{
+				runResult: process.RunResult{Failed: process.PaymentErrorOccurredReason{Error: placeorder.ValidatePaymentErrorStatusFailed}},
 				state:     states.New{}.Name(),
 			},
 		},
@@ -418,8 +449,8 @@ func TestPaymentValidator(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			factory := provideProcessFactory(t)
 			p, _ := factory.New(&url.URL{}, provideCartWithPaymentSelection(t))
-			gateway := &mocks.WebCartPaymentGateway{}
-			gateway.On("FlowStatus", mock.Anything, mock.Anything, p.Context().UUID).Return(tt.flowStatus.flowStatus, tt.flowStatus.err).Once()
+			gateway := mocks.NewWebCartPaymentGateway(t)
+			gateway.EXPECT().FlowStatus(mock.Anything, mock.Anything, p.Context().UUID).Return(tt.flowStatus.flowStatus, tt.flowStatus.err).Once()
 
 			paymentService := paymentServiceHelper(t, gateway)
 			got := placeorder.PaymentValidator(context.Background(), p, paymentService)

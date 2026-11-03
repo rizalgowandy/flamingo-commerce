@@ -5,13 +5,14 @@ import (
 	// embed schema.graphql
 	_ "embed"
 
+	formDomain "flamingo.me/form/domain"
+	"flamingo.me/graphql"
+
 	"flamingo.me/flamingo-commerce/v3/cart/domain/cart"
 	"flamingo.me/flamingo-commerce/v3/cart/domain/placeorder"
 	"flamingo.me/flamingo-commerce/v3/cart/domain/validation"
 	"flamingo.me/flamingo-commerce/v3/cart/interfaces/controller/forms"
 	"flamingo.me/flamingo-commerce/v3/cart/interfaces/graphql/dto"
-	formDomain "flamingo.me/form/domain"
-	"flamingo.me/graphql"
 )
 
 // Service describes the Commerce/Cart GraphQL Service
@@ -66,8 +67,11 @@ func (*Service) Types(types *graphql.Types) {
 	types.Map("Commerce_Cart_PricedShippingItem", dto.PricedShippingItem{})
 	types.Map("Commerce_Cart_PricedTotalItem", dto.PricedTotalItem{})
 	types.Map("Commerce_Cart_BillingAddressForm", dto.BillingAddressForm{})
+	types.Map("Commerce_Cart_PersonalDataForm", dto.PersonalDataForm{})
 	types.Map("Commerce_Cart_AddressForm", forms.AddressForm{})
 	types.Map("Commerce_Cart_AddressFormInput", forms.AddressForm{})
+	types.Map("Commerce_Cart_PersonalData", forms.DefaultPersonalDataForm{})
+	types.Map("Commerce_Cart_PersonalDataInput", forms.DefaultPersonalDataForm{})
 	types.Map("Commerce_Cart_Form_ValidationInfo", dto.ValidationInfo{})
 	types.Map("Commerce_Cart_Form_Error", formDomain.Error{})
 	types.Map("Commerce_Cart_Form_FieldError", dto.FieldError{})
@@ -81,6 +85,8 @@ func (*Service) Types(types *graphql.Types) {
 	types.Map("Commerce_Cart_DeliveryAddressForm", dto.DeliveryAddressForm{})
 	types.Map("Commerce_Cart_DeliveryAddressInput", forms.DeliveryForm{})
 	types.Map("Commerce_Cart_UpdateDeliveryShippingOptions_Result", dto.UpdateShippingOptionsResult{})
+	types.Map("Commerce_Cart_AddToCartInput", dto.AddToCart{})
+	types.Map("Commerce_Cart_ChoiceConfigurationInput", dto.ChoiceConfiguration{})
 
 	types.GoField("Commerce_Cart_DeliveryAddressInput", "deliveryCode", "LocationCode")
 	types.GoField("Commerce_Cart_DeliveryAddressInput", "carrier", "ShippingCarrier")
@@ -101,7 +107,9 @@ func (*Service) Types(types *graphql.Types) {
 	types.Resolve("Mutation", "Commerce_Cart_DeleteCartDelivery", CommerceCartMutationResolver{}, "CommerceDeleteCartDelivery")
 	types.Resolve("Mutation", "Commerce_Cart_DeleteItem", CommerceCartMutationResolver{}, "CommerceDeleteItem")
 	types.Resolve("Mutation", "Commerce_Cart_UpdateItemQty", CommerceCartMutationResolver{}, "CommerceUpdateItemQty")
+	types.Resolve("Mutation", "Commerce_Cart_UpdateItemBundleConfig", CommerceCartMutationResolver{}, "CommerceUpdateItemBundleConfig")
 	types.Resolve("Mutation", "Commerce_Cart_UpdateBillingAddress", CommerceCartMutationResolver{}, "CommerceCartUpdateBillingAddress")
+	types.Resolve("Mutation", "Commerce_Cart_UpdatePersonalData", CommerceCartMutationResolver{}, "CommerceCartUpdatePersonalData")
 	types.Resolve("Mutation", "Commerce_Cart_UpdateSelectedPayment", CommerceCartMutationResolver{}, "CommerceCartUpdateSelectedPayment")
 	types.Resolve("Mutation", "Commerce_Cart_ApplyCouponCodeOrGiftCard", CommerceCartMutationResolver{}, "CommerceCartApplyCouponCodeOrGiftCard")
 	types.Resolve("Mutation", "Commerce_Cart_RemoveGiftCard", CommerceCartMutationResolver{}, "CommerceCartRemoveGiftCard")

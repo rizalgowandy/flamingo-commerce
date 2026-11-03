@@ -7,6 +7,10 @@ import (
 	searchDomain "flamingo.me/flamingo-commerce/v3/search/domain"
 )
 
+var (
+	ErrProductNotFound = fmt.Errorf("product not found")
+)
+
 type (
 	// ProductService interface
 	ProductService interface {
@@ -21,8 +25,9 @@ type (
 	}
 
 	// SearchService is a typed search for products
+	// when search operation does not found anything preferably return empty result over an error
 	SearchService interface {
-		//Search returns Products based on given Filters
+		// Search returns Products based on given Filters
 		Search(ctx context.Context, filter ...searchDomain.Filter) (*SearchResult, error)
 		// SearchBy returns Products prefiltered by the given attribute (also based on additional given Filters)
 		// e.g. SearchBy(ctx,"brandCode","apple")
@@ -30,10 +35,13 @@ type (
 	}
 
 	// ProductNotFound is an error
+	// Deprecated: please use var ErrProductNotFound
 	ProductNotFound struct {
 		MarketplaceCode string
 	}
 )
+
+var _ error = ProductNotFound{}
 
 // Error implements the error interface
 func (err ProductNotFound) Error() string {

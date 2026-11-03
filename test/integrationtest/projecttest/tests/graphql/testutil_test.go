@@ -6,8 +6,8 @@ package graphql_test
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"testing"
@@ -22,7 +22,7 @@ import (
 
 func loadGraphQL(t *testing.T, name string, replacements map[string]string) string {
 	t.Helper()
-	content, err := ioutil.ReadFile(path.Join("testdata", name+".graphql"))
+	content, err := os.ReadFile(path.Join("testdata", name+".graphql"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func assertStartPlaceOrderWithValidUUID(t *testing.T, e *httpexpect.Expect) (*ht
 	response.Status(http.StatusOK)
 	uuidMatches := getValue(response, "Commerce_Checkout_StartPlaceOrder", "uuid").String().
 		Match("(?i)^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$")
-	uuidMatches.Length().Equal(1)
+	uuidMatches.Length().IsEqual(1)
 
 	return response, uuidMatches.Index(0).Raw()
 }

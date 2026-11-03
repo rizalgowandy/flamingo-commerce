@@ -1,20 +1,13 @@
 package cart
 
-//go:generate go run github.com/vektra/mockery/v2 --name CompleteBehaviour --case snake
-//go:generate go run github.com/vektra/mockery/v2 --name CustomerCartService --case snake
-//go:generate go run github.com/vektra/mockery/v2 --name GiftCardAndVoucherBehaviour --case snake
-//go:generate go run github.com/vektra/mockery/v2 --name GiftCardBehaviour --case snake
-//go:generate go run github.com/vektra/mockery/v2 --name GuestCartService --case snake
-//go:generate go run github.com/vektra/mockery/v2 --name ModifyBehaviour --case snake
-
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
+	productDomain "flamingo.me/flamingo-commerce/v3/product/domain"
 	"flamingo.me/flamingo/v3/core/auth"
 	"flamingo.me/flamingo/v3/framework/flamingo"
-
-	"github.com/pkg/errors"
 )
 
 type (
@@ -92,6 +85,7 @@ type (
 		Qty                    int
 		VariantMarketplaceCode string
 		AdditionalData         map[string]string
+		BundleConfiguration    productDomain.BundleConfiguration
 	}
 
 	// ItemUpdateCommand defines the update item command
@@ -104,6 +98,8 @@ type (
 		AdditionalData map[string]string
 		// Mandatory field: ItemID is only for identifying the item.
 		ItemID string
+		// BundleConfiguration contains an updated config of a bundle
+		BundleConfiguration productDomain.BundleConfiguration
 	}
 
 	// DeliveryInfoUpdateCommand defines the update item command
@@ -115,11 +111,11 @@ type (
 
 var (
 	// ErrCartNotFound is used if a cart was not found
-	ErrCartNotFound = errors.New("Cart not found")
+	ErrCartNotFound = errors.New("cart not found")
 	// ErrItemNotFound is used if a item on cart was not found
-	ErrItemNotFound = errors.New("Item not found")
+	ErrItemNotFound = errors.New("item not found")
 	// ErrDeliveryCodeNotFound is used if a delivery was not found
-	ErrDeliveryCodeNotFound = errors.New("Delivery not found")
+	ErrDeliveryCodeNotFound = errors.New("delivery not found")
 )
 
 // CreateDeliveryInfoUpdateCommand - factory to get the update command based on the given deliveryInfos (which might come from cart)

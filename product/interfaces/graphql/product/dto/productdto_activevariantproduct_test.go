@@ -4,10 +4,12 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	priceDomain "flamingo.me/flamingo-commerce/v3/price/domain"
 	productDomain "flamingo.me/flamingo-commerce/v3/product/domain"
 	graphqlProductDto "flamingo.me/flamingo-commerce/v3/product/interfaces/graphql/product/dto"
-	"github.com/stretchr/testify/assert"
 )
 
 func getProductDomainConfigurableWithActiveVariantProduct() productDomain.ConfigurableProductWithActiveVariant {
@@ -57,14 +59,14 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 						Code:      "attribute_a_code",
 						CodeLabel: "attribute_a_codeLabel",
 						Label:     "attribute_a_variantLabel",
-						RawValue:  nil,
+						RawValue:  "attribute_a_variantValue",
 						UnitCode:  "attribute_a_unitCode",
 					},
 					"attribute_b_code": {
 						Code:      "attribute_b_code",
 						CodeLabel: "attribute_b_codeLabel",
 						Label:     "attribute_b_variantLabel",
-						RawValue:  nil,
+						RawValue:  "attribute_b_variantValue",
 						UnitCode:  "attribute_b_unitCode",
 					},
 				},
@@ -102,6 +104,16 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 					Default: priceDomain.NewFromFloat(10.00, "EUR"),
 					Context: productDomain.PriceContext{CustomerGroup: "gold-members"},
 				}},
+				LoyaltyPrices: []productDomain.LoyaltyPriceInfo{
+					{
+						Default: priceDomain.NewFromFloat(10.0, "LOYALTY"),
+						Context: productDomain.PriceContext{DeliveryCode: "inflight"},
+					},
+					{
+						Default: priceDomain.NewFromFloat(12.0, "LOYALTY"),
+						Context: productDomain.PriceContext{DeliveryCode: "domestic____home"},
+					},
+				},
 			},
 		},
 
@@ -111,8 +123,8 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 
 		VariantVariationAttributesSorting: map[string][]string{
 			"attribute_a_code": {
-				"attribute_a_variantLabel",
-				"attribute_b_variantLabel",
+				"attribute_a_variantValue",
+				"attribute_b_variantValue",
 			},
 		},
 
@@ -125,14 +137,14 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 							Code:      "attribute_a_code",
 							CodeLabel: "attribute_a_codeLabel",
 							Label:     "attribute_a_variantLabel",
-							RawValue:  nil,
+							RawValue:  "attribute_a_variantValue",
 							UnitCode:  "attribute_a_unitCode",
 						},
 						"attribute_b_code": {
 							Code:      "attribute_b_code",
 							CodeLabel: "attribute_b_codeLabel",
 							Label:     "attribute_b_variantLabel",
-							RawValue:  nil,
+							RawValue:  "attribute_b_variantValue",
 							UnitCode:  "attribute_b_unitCode",
 						},
 					},
@@ -147,14 +159,14 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 							Code:      "attribute_a_code",
 							CodeLabel: "attribute_a_codeLabel",
 							Label:     "attribute_a_variantLabel",
-							RawValue:  nil,
+							RawValue:  "attribute_a_variantValue",
 							UnitCode:  "attribute_a_unitCode",
 						},
 						"attribute_b_code": {
 							Code:      "attribute_b_code",
 							CodeLabel: "attribute_b_codeLabel",
 							Label:     "attribute_b_variantLabel",
-							RawValue:  nil,
+							RawValue:  "attribute_b_variantValue",
 							UnitCode:  "attribute_b_unitCode",
 						},
 					},
@@ -167,12 +179,14 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 			TeaserLoyaltyPriceInfo: &productDomain.LoyaltyPriceInfo{
 				Type:    "AwesomeLoyaltyProgram",
 				Default: priceDomain.NewFromFloat(500, "BonusPoints"),
+				Context: productDomain.PriceContext{
+					DeliveryCode: "ispu",
+				},
 			},
 			TeaserLoyaltyEarningInfo: &productDomain.LoyaltyEarningInfo{
 				Type:    "AwesomeLoyaltyProgram",
 				Default: priceDomain.NewFromFloat(23.23, "BonusPoints"),
 			},
-
 			Media: []productDomain.Media{
 				{
 					Type:      "teaser",
@@ -195,7 +209,7 @@ func getProductDomainConfigurableWithActiveVariantProduct() productDomain.Config
 
 func getActiveVariantProduct() graphqlProductDto.ActiveVariantProduct {
 	product := getProductDomainConfigurableWithActiveVariantProduct()
-	return graphqlProductDto.NewGraphqlProductDto(product, nil).(graphqlProductDto.ActiveVariantProduct)
+	return graphqlProductDto.NewGraphqlProductDto(product, nil, nil).(graphqlProductDto.ActiveVariantProduct)
 }
 
 func TestActiveVariantProduct_Attributes(t *testing.T) {
@@ -247,6 +261,18 @@ func TestActiveVariantProduct_Loyalty(t *testing.T) {
 
 	assert.Equal(t, "AwesomeLoyaltyProgram", product.Loyalty().Earning.Type)
 	assert.Equal(t, "AwesomeLoyaltyProgram", product.Loyalty().Price.Type)
+	assert.Equal(t, "ispu", product.Loyalty().Price.Context.DeliveryCode)
+
+	require.Len(t, product.Loyalty().AvailablePrices, 2)
+
+	firstLoyalty := product.Loyalty().AvailablePrices[0]
+	secondLoyalty := product.Loyalty().AvailablePrices[1]
+
+	assert.Equal(t, 10.0, firstLoyalty.Default.FloatAmount())
+	assert.Equal(t, "inflight", firstLoyalty.Context.DeliveryCode)
+
+	assert.Equal(t, 12.0, secondLoyalty.Default.FloatAmount())
+	assert.Equal(t, "domestic____home", secondLoyalty.Context.DeliveryCode)
 }
 
 func TestActiveVariantProduct_MarketPlaceCode(t *testing.T) {
@@ -321,9 +347,10 @@ func TestActiveVariantProduct_VariationSelections(t *testing.T) {
 			Label: "attribute_a_codeLabel",
 			Options: []graphqlProductDto.VariationSelectionOption{
 				{
-					Label:   "attribute_a_variantLabel",
-					State:   graphqlProductDto.VariationSelectionOptionStateActive,
-					Variant: graphqlProductDto.NewVariationSelectionOptionVariant(configurableProduct.Variants[0]),
+					Label:    "attribute_a_variantLabel",
+					UnitCode: "attribute_a_unitCode",
+					State:    graphqlProductDto.VariationSelectionOptionStateActive,
+					Variant:  graphqlProductDto.NewVariationSelectionOptionVariant(configurableProduct.Variants[0]),
 				},
 			},
 		},
@@ -334,9 +361,10 @@ func TestActiveVariantProduct_ActiveVariationSelections(t *testing.T) {
 	product := getActiveVariantProduct()
 
 	assert.Equal(t, []graphqlProductDto.ActiveVariationSelection{{
-		Code:  "attribute_a_code",
-		Label: "attribute_a_codeLabel",
-		Value: "attribute_a_variantLabel",
+		Code:     "attribute_a_code",
+		Label:    "attribute_a_codeLabel",
+		Value:    "attribute_a_variantLabel",
+		UnitCode: "attribute_a_unitCode",
 	}}, product.ActiveVariationSelections())
 }
 

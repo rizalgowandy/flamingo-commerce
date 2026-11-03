@@ -33,12 +33,14 @@ type (
 		Loyalty() ProductLoyalty
 		Attributes() productDomain.Attributes
 		Badges() ProductBadges
+		Specifications() *ProductSpecifications
 	}
 
 	// ProductLoyalty contains all loyalty related information
 	ProductLoyalty struct {
-		Price   *productDomain.LoyaltyPriceInfo
-		Earning *productDomain.LoyaltyEarningInfo
+		Price           *productDomain.LoyaltyPriceInfo
+		AvailablePrices []productDomain.LoyaltyPriceInfo
+		Earning         *productDomain.LoyaltyEarningInfo
 	}
 
 	// ProductMedia returns media for the product
@@ -62,6 +64,23 @@ type (
 		All []productDomain.Badge
 	}
 
+	// ProductSpecifications wrapper for specifications of the product
+	ProductSpecifications struct {
+		Groups []ProductSpecificationGroup
+	}
+
+	// ProductSpecificationGroup groups specifications
+	ProductSpecificationGroup struct {
+		Title   string
+		Entries []ProductSpecificationEntry
+	}
+
+	// ProductSpecificationEntry data
+	ProductSpecificationEntry struct {
+		Label  string
+		Values []string
+	}
+
 	// VariationSelection represents possible combinations for attached variants
 	VariationSelection struct {
 		Code    string
@@ -71,9 +90,10 @@ type (
 
 	// VariationSelectionOption one possible variation option
 	VariationSelectionOption struct {
-		Label   string
-		State   VariationSelectionOptionState
-		Variant VariationSelectionOptionVariant
+		Label    string
+		UnitCode string
+		State    VariationSelectionOptionState
+		Variant  VariationSelectionOptionVariant
 	}
 
 	// VariationSelectionOptionState state of the option
@@ -81,14 +101,60 @@ type (
 
 	// ActiveVariationSelection The variation for the currently active variant
 	ActiveVariationSelection struct {
-		Code  string
-		Label string
-		Value string
+		Code     string
+		Label    string
+		Value    string
+		UnitCode string
 	}
 
 	// VariationSelectionOptionVariant Information about the underlying variant
 	VariationSelectionOptionVariant struct {
 		variant productDomain.Variant
+	}
+
+	ChoiceConfiguration struct {
+		Identifier             string
+		MarketplaceCode        string
+		VariantMarketplaceCode *string
+		Qty                    int
+	}
+
+	// VariantSelection contains information about all possible variant selections
+	VariantSelection struct {
+		Attributes []VariantSelectionAttribute
+		Variants   []VariantSelectionMatch
+	}
+
+	VariantSelectionAttribute struct {
+		Label   string
+		Code    string
+		Options []VariantSelectionAttributeOption
+	}
+
+	VariantSelectionAttributeOption struct {
+		Label                       string
+		UnitCode                    string
+		OtherAttributesRestrictions []OtherAttributesRestriction
+	}
+
+	OtherAttributesRestriction struct {
+		Code             string
+		AvailableOptions []string
+	}
+
+	VariantSelectionMatch struct {
+		Attributes []VariantSelectionMatchAttributes
+		Variant    VariantSelectionMatchVariant
+	}
+
+	VariantSelectionMatchAttributes struct {
+		Key   string
+		Value string
+	}
+
+	VariantSelectionMatchVariant struct {
+		MarketplaceCode string
+		VariantData     productDomain.Variant
 	}
 )
 
@@ -96,6 +162,7 @@ var (
 	_ Product = SimpleProduct{}
 	_ Product = ConfigurableProduct{}
 	_ Product = ActiveVariantProduct{}
+	_ Product = BundleProduct{}
 )
 
 // GetMedia returns the FIRST found Product media by usage
@@ -109,7 +176,7 @@ func (pm ProductMedia) GetMedia(usage string) *productDomain.Media {
 }
 
 // NewGraphqlProductDto returns a new Product dto
-func NewGraphqlProductDto(product productDomain.BasicProduct, preSelectedVariantSku *string) Product {
+func NewGraphqlProductDto(product productDomain.BasicProduct, preSelectedVariantSku *string, bundleConfiguration productDomain.BundleConfiguration) Product {
 	if product.Type() == productDomain.TypeConfigurable {
 		configurableProduct := product.(productDomain.ConfigurableProduct)
 
@@ -145,6 +212,40 @@ func NewGraphqlProductDto(product productDomain.BasicProduct, preSelectedVariant
 		}
 	}
 
+	if product.Type() == productDomain.TypeBundleWithActiveChoices {
+		bundleProduct := product.(productDomain.BundleProductWithActiveChoices)
+
+		bundleDto := BundleProduct{
+			product:      bundleProduct.BundleProduct,
+			Choices:      mapWithActiveChoices(bundleProduct.Choices, bundleProduct.ActiveChoices),
+			bundleConfig: bundleProduct.ExtractBundleConfig(),
+		}
+
+		return bundleDto
+	}
+
+	if product.Type() == productDomain.TypeBundle {
+		bundleProduct := product.(productDomain.BundleProduct)
+
+		if len(bundleConfiguration) != 0 {
+			bundleProductWithActiveChoices, err := bundleProduct.GetBundleProductWithActiveChoices(bundleConfiguration)
+			if err == nil {
+				bundleDto := BundleProduct{
+					product:      bundleProductWithActiveChoices.BundleProduct,
+					Choices:      mapWithActiveChoices(bundleProductWithActiveChoices.Choices, bundleProductWithActiveChoices.ActiveChoices),
+					bundleConfig: bundleConfiguration,
+				}
+
+				return bundleDto
+			}
+		}
+
+		return BundleProduct{
+			product: bundleProduct,
+			Choices: mapChoices(bundleProduct.Choices),
+		}
+	}
+
 	simpleProduct := product.(productDomain.SimpleProduct)
 	return SimpleProduct{
 		product: simpleProduct,
@@ -166,9 +267,41 @@ func (v *VariationSelectionOptionVariant) BaseData() productDomain.BasicProductD
 	return v.variant.BaseData()
 }
 
+// Variant of the variant
+func (v *VariationSelectionOptionVariant) Variant() productDomain.BasicProductData {
+	return v.variant.BaseData()
+}
+
 // First badge of all badges, returns nil if there is no first badge
 func (b *ProductBadges) First() *productDomain.Badge {
 	badges := productDomain.Badges(b.All)
 
 	return badges.First()
+}
+
+// MapSpecifications converts domain specifications to DTO specifications
+// Returns nil if there are no specification groups
+func MapSpecifications(specs productDomain.Specifications) *ProductSpecifications {
+	if len(specs.Groups) == 0 {
+		return nil
+	}
+
+	groups := make([]ProductSpecificationGroup, len(specs.Groups))
+
+	for i, group := range specs.Groups {
+		entries := make([]ProductSpecificationEntry, len(group.Entries))
+		for j, entry := range group.Entries {
+			entries[j] = ProductSpecificationEntry{
+				Label:  entry.Label,
+				Values: entry.Values,
+			}
+		}
+
+		groups[i] = ProductSpecificationGroup{
+			Title:   group.Title,
+			Entries: entries,
+		}
+	}
+
+	return &ProductSpecifications{Groups: groups}
 }

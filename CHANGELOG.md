@@ -1,5 +1,249 @@
 # Changelog
-## v3.5.0 [upcoming]
+
+## v3.14.1 [upcoming]
+
+**category**
+* GraphQL: `Commerce_Category` returns `category_page_out_of_range` instead of `category_general_error` when the requested page is out of range
+
+## v3.14.0
+
+**product**
+* Added optional `Color` and `Priority` to the product `Badge`
+* GraphQL: Expose the optional `color` and `priority` fields on `Commerce_Product_Badge`
+
+## v3.13.0
+**cart**
+* Fixed hiccups in cart merge strategies caused by the addition of payment selection from guest cart, when some items were not added to customer's cart due to errors.
+* Add effective payment method to transactions
+* GraphQL: Added the `Commerce_Cart_UpdatePersonalData` mutation to update the personal data of the cart
+* GraphQL: Exposed all prices on the line item level
+* Added the `CartItemMatcher` extension point to decide whether an add to cart request merges into an existing cart item
+* Added `CustomAttributes` to `AppliedDiscount`
+
+**product**
+* GraphQL: Expose product specifications via `specifications` field on all product types (SimpleProduct, ConfigurableProduct, ActiveVariantProduct, BundleProduct)
+* Added Saleable model method to check saleability against a given time frame.
+
+**checkout**
+* Added optional `username`, `password` and `useTLS` settings to the redis place order lock and context store
+* Enhanced the cancellation flow with detailed reasons threading through the place-order process
+* GraphQL: Added an optional `reason` argument to the `Commerce_Checkout_CancelPlaceOrder` mutation
+* **Breaking:** `placeorder.Coordinator.Cancel` now requires a `CancellationReason` argument
+* Failed and cancelled payments now fail the place order process with the fixed reasons `payment process failed` and `payment process cancelled` instead of the payment provider's error text
+
+**graphql**
+* **Breaking:** Cart, category, checkout and customer resolvers return generic errors such as `cart_general_error` and log the original error. Only these messages are kept:
+  * cart: item not found, delivery not found, max quantity on qty update and product validation errors on add to cart
+  * checkout: `ErrNoPlaceOrderProcess` and the final state error on cancel
+  * category: `category_not_found`
+
+**payment**
+* **Breaking:** `WebCartPaymentGateway.CancelOrderPayment` now requires a `CancellationReason` argument. Added the `CancellationReason` type to the domain.
+
+**search**
+* Added `FacetMapper` interface and `BindMulti` registry to allow custom facet types in GraphQL. Built-in facet types (ListFacet, TreeFacet, RangeFacet) are now registered as mappers.
+* **Breaking:** Removed `SearchResultDTO.Inject`. Deprecated `WrapSearchResult`, use `SearchResultDTOFactory.NewSearchResultDTO` instead.
+* `SearchResult` of the search application service now contains the `Actions` returned by the search service
+
+**sourcing**
+* Extended Source model with SuppliedBy attribute
+
+**prices**
+* Extended Price Context with fields `From` and `To`, meaning that this price is valid of the defined time frame.
+
+**dependencies**
+* **Breaking:** Go 1.26 or newer is required (was 1.23)
+* **Breaking:** Projects with generated GraphQL code must regenerate it with gqlgen v0.17.95
+* Updated flamingo.me/graphql to v1.13.0, gqlgen to v0.17.95 and gqlparser to v2.5.59
+* Updated flamingo.me/flamingo/v3 to v3.17.4 and flamingo.me/dingo to v0.4.1. Dingo now fails at startup if modules depend on each other in a cycle.
+
+## v3.12.0
+**product**
+* Added exported method BundleConfiguration to the GraphQL DTO for the bundle product
+* Deprecated struct error ProductNotFound in favour of var ErrProductNotFound
+* Introduced product not found error and general error to product graphql resolver
+
+**checkout**
+* add config `commerce.checkout.orderService.skipCartValidation` to disable cart validation that happens right before placing an order in the OrderService
+
+**search**
+* **Breaking:** fixed fake service to interpret sort options and gives away empty promotion
+* removed deprecation notice from fields `Asc` and `Desc` in `SortOption` struct
+
+**category**
+* Introduced general error to category graphql resolver
+
+## v3.11.0
+
+**search**
+* The fake search service now interprets the passed sort options.
+
+**cart**
+* add possibility to get price in main currency for a payment method
+* during add to cart delivery method is now saved in context
+* **Fix:** error returned by `collectTotals(cart)` in DefaultCartBehaviour is now bubbled up
+
+**product**
+* **Fix:** price in loyalty points, during calculation of loyalty charge, is now rounded mathematically according to possible currency fractions 
+
+## v3.10.0
+
+**sourcing**
+* **Breaking:** Drop deprecated sourcing service `SourcingServiceDetail` and all things related.
+
+**price**
+* **Breaking:** Introduce currency library http://github.com/Rhymond/go-money for more flexible rounding. All currency codes should comply to ISO4217 from now on.
+
+**product**
+* Introduced multiple loyalty prices for one product by adding AvailablePrices to ProductLoyalty.
+* Added ActiveLoyaltyPrice to Saleable and adapted charges generation to use it instead of array
+
+## v3.9.0
+
+**search**
+* Introduce an Action to search result to advise the frontend to perform an action for that search different from displaying the result page.
+  The action model is completely open to anything, but the most common use case is to redirect certain searches directly to product detail pages or special brand landing pages.
+
+**cart**
+* Fix: Cart merge of bundle products was broken, bundle configuration is now correctly added to the new customer cart
+* Fix: Add to cart of bundle products now only fails for missing required bundle choices. As prior passing all choices with qty of zero have been required. Now optional choices with qty of zero can be omitted.
+* Fix: Correctly evaluate min / max quantities of bundle choices. Previously it was possible to add bundle choices with qty 0 even if min qty was 1.
+* **Breaking**(In case you have implemented a custom cart service): Extend the cart service interface with `UpdateItemBundleConfig` to allow updating bundles that have already been placed inside the cart.
+* GraphQL:
+  * Add new mutation `Commerce_Cart_UpdateItemBundleConfig` to update bundle configs for existing cart items
+  * **Breaking** Make the qty in the `Commerce_Cart_ChoiceConfigurationInput` type mandatory, previously 1 was taken as a default
+
+**checkout**
+* initialize place order metrics with 0 on application start to follow prometheus best practices
+
+**product**
+* GraphQL:
+  * Expose Active Option (product+qty) for bundle products
+  * **Breaking** Make the qty in the `Commerce_Product_ChoiceConfigurationInput` type mandatory, previously it was 0 which lead to taking the minimum required qty of that choice
+
+## v3.8.0
+
+**sourcing**
+* Introduce constant `MaxSourceQty` to indicate unlimited stock.
+
+**cart**
+* DefaultBehavior: consider discounts when updating cart item row prices
+* Make the cart merge strategy configurable, this strategy handles how a guest cart is transformed into a customer cart.
+  The following strategies can be set via the config `commerce.cart.mergeStrategy`:
+  * `merge` (default): Merge the content of the guest and customer cart
+  * `replace`: Replace the customer cart with the guest cart content
+  * `none`: Don't do anything, guest cart is lost during customer sign-in.
+* Telephone in Address is now deprecated. To distinguish phone number parts new fields were introduced: TelephoneCountryCode, 
+  TelephoneAreaCode, TelephoneNumber. Changes are expected to be non-breaking.
+
+## v3.7.0
+
+**cart**
+* Updated the `DefaultCartBehaviour` to be able to support other `CartStorage` implementations
+    * Dropped the fake implementations of `GiftCardHandler` and `VoucherHandler` to not magically add some discounts
+
+**general**
+* Add .golangci.yml and github workflow
+* Add .mockery.yaml config
+
+**sourcing**
+* **Breaking**
+    * SourcingService changed types for return values for bundle product support.
+      Every sourcing value is now returned per product id.
+
+## v3.6.0
+
+**cart**
+* **Breaking**: Move all calculations to cart behaviour implementation
+  * By moving calculation responsibility, we enable different implementation possibilities for calculations like tax before or after discounts, tax on single item or sum and different tax rounding modes instead of having it hard-coded in the flamingo cart.
+  * All calculation functions on cart item, shipping item, delivery and cart are now public fields for which the values must be set by the cart behaviour implementation
+  * The `DefaultCartBehaviour` calculates all new fields accordingly
+  * Removed `ItemBuilder`, `DeliveryBuilder` and `Builder` since they didn't provide any meaningful functionality after removing the calculations. Please create structs directly.
+  * Changed the GraphQL cart model accordingly.
+  * To help with the migration there are sed commands for the following fields in `cart/migration.sed`: run `find . -type f -iname '*.go' -exec gsed -i -f migration.sed "{}" +;`
+  * Cart items
+      * | Old Function                           | New Field                            |
+        |----------------------------------------|--------------------------------------|
+        | RowPriceGrossWithDiscount()            | RowPriceGrossWithDiscount            |
+        | RowPriceGrossWithItemRelatedDiscount() | RowPriceGrossWithItemRelatedDiscount |
+        | RowPriceNetWithDiscount()              | RowPriceNetWithDiscount              |
+        | RowPriceNetWithItemRelatedDiscount()   | RowPriceNetWithItemRelatedDiscount   |
+        | TotalDiscountAmount()                  | TotalDiscountAmount                  |
+        | ItemRelatedDiscountAmount()            | ItemRelatedDiscountAmount            |
+        | NonItemRelatedDiscountAmount()         | NonItemRelatedDiscountAmount         |
+  * Shipping items
+      * | Old Function               | New Field               |
+        |----------------------------|-------------------------|
+        | TotalWithDiscountInclTax() | PriceGrossWithDiscounts |
+        | -                          | PriceNetWithDiscounts   |
+  * Deliveries
+      * | Old Function                      | New Field                       |
+        |-----------------------------------|---------------------------------|
+        | SubTotalGross()                   | SubTotalGross                   |
+        | SubTotalNet()                     | SubTotalNet                     |
+        | SumTotalDiscountAmount()          | TotalDiscountAmount             |
+        | SumSubTotalDiscountAmount()       | SubTotalDiscountAmount          |
+        | SumNonItemRelatedDiscountAmount() | NonItemRelatedDiscountAmount    |
+        | SumItemRelatedDiscountAmount()    | ItemRelatedDiscountAmount       |
+        | SubTotalGrossWithDiscounts()      | SubTotalGrossWithDiscounts      |
+        | SubTotalNetWithDiscounts()        | SubTotalNetWithDiscounts        |
+        | GrandTotal()                      | GrandTotal                      |
+  * Cart
+      * | Old Function                      | New Field                       |
+        |-----------------------------------|---------------------------------|
+        | GrandTotal()                      | GrandTotal                      |
+        | -                                 | GrandTotalNet                   |
+        | SumShippingNet()                  | ShippingNet                     |
+        | SumShippingNetWithDiscounts()     | ShippingNetWithDiscounts        |
+        | SumShippingGross()                | ShippingGross                   |
+        | SumShippingGrossWithDiscounts()   | ShippingGrossWithDiscounts      |
+        | SubTotalGross()                   | SubTotalGross                   |
+        | SubTotalNet()                     | SubTotalNet                     |
+        | SubTotalGrossWithDiscounts()      | SubTotalGrossWithDiscounts      |
+        | SubTotalNetWithDiscounts()        | SubTotalNetWithDiscounts        |
+        | SumTotalDiscountAmount()          | TotalDiscountAmount             |
+        | SumNonItemRelatedDiscountAmount() | NonItemRelatedDiscountAmount    |
+        | SumItemRelatedDiscountAmount()    | ItemRelatedDiscountAmount       |
+        | SumAppliedGiftCards()             | TotalGiftCardAmount             |
+        | SumGrandTotalWithGiftCards()      | GrandTotalWithGiftCards         |
+        | -                                 | GrandTotalNetWithGiftCards      |
+* Dispatch a `PreCartMergeEvent` before and a `PostCartMergeEvent` after merging a guest and customer cart when logging in
+* Update payment selection on cart merge with the guest carts' payment selection after applying coupons and giftcards and only if customer cart has no items
+* Add possibility to have additional data in `AddToCartNotAllowed` error
+* Deprecate `BuildAddRequest` in cart service (build your own add request)
+* Provide `BaseCartReceiver` for fetching carts without `DecoratedCartFactory` dependency
+* Provide `Receiver` interface to be able to mock receiving a cart
+* GraphQL:
+  * Aggregate many input values to `Commerce_Cart_AddToCart` mutation in `Commerce_Cart_AddToCartInput`
+  * Add support for bundle and configurable products in `Commerce_Cart_AddToCart` mutation
+* Added support for AdditionalData on CartItem Level for the defaultCartBehaviour.
+
+**checkout**
+* Add possibility to have additional data in `PaymentFlowActionTriggerClientSDK`
+* Breaking: Disable auto canceling of orders during place order rollback, to restore old behaviour set `commerce.checkout.placeorder.states.placeorder.cancelOrdersDuringRollback: true`
+
+**product**
+* Introduce `Labels()` function on `Attribute` to handle translations for attributes with multiple values, will fallback to `Values()` function if not translated.
+* Introduce `Stock` slice in `BasicProductData` to store more accurate information about availability for each delivery code
+* Introduce new `BundleProduct` and `BundleProductWithActiveChoices` types
+* GraphQL:
+  * Add `unitCode` to`Commerce_Product_VariationSelection_Option` and `Commerce_Product_ActiveVariationSelection`
+  * Fix mapping of VariationSelections
+  * Introduce `Labels` for attributes here as well
+  * Extend `Commerce_Product` query with non-mandatory bundle configuration argument
+  * Add type `Commerce_Product_BundleProduct` that implements `Commerce_Product` interface and is used as bundle product graphql representation.
+  * Change `variantionSelections` field in configurable products with `variantSelection` that handles all possible combinations of multi axis configurable.
+* FakeService
+  * Add configuration option `commerce.product.fakeservice.defaultProducts` which toggles the delivery of default test products. 
+  * Add category facet functionality to the fake `SearchService` with default category facet items.
+  * Add configuration option `commerce.product.fakeservice.jsonTestDataCategoryFacetItems` which can be used to provide your own category facet items. 
+  * Add new `Stock` field to returned `SimpleProduct` from service
+  * Add configuration option for delivery codes `commerce.product.fakeservice.deliveryCodes` which can be used to provide different delivery codes for stock.
+
+## v3.5.0
+**general**
+* Switch to MIT License
+
 **cart**
 * Add convenience function to clone carts
 * DefaultCartBehaviour now returns real cart clones to prevent data races on cart fields 
@@ -31,6 +275,7 @@
   * **Breaking**: `Commerce_Cart_UpdateDeliveryShippingOptions` mutation responded with slice of `Commerce_Cart_DeliveryAddressForm` which was incorrect as we don't process any form data within the mutation. It responds now rightly only with `processed` state.
 * **Breaking**: Upgrade github.com/go-playground/form to v4, all types are fully compatible, but import paths have to be changed
 
+
 **checkout**
 * Introducing Flamingo events on final states of the place order process
 * Introduce a max ttl for the checkout state machine to avoid polluting the redis with stale checkout processes, defaults to 2h
@@ -51,6 +296,7 @@
 
 **price**
 * When marshalling `domain.Price` to JSON the amount is rounded.
+* Fix various rounding issues with negative prices, add all rounding modes and examples to moduel readme.
 
 **product**
 * Enhance the `PriceContext` to allow potential delivery specific pricing

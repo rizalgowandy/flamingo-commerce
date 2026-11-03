@@ -3,17 +3,22 @@ package graphql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
+	"strings"
 
-	cartDomain "flamingo.me/flamingo-commerce/v3/cart/domain/cart"
-	"flamingo.me/flamingo-commerce/v3/cart/interfaces/controller/forms"
-	cartForms "flamingo.me/flamingo-commerce/v3/cart/interfaces/controller/forms"
-	"flamingo.me/flamingo-commerce/v3/cart/interfaces/graphql/dto"
 	formApplication "flamingo.me/form/application"
 	"flamingo.me/form/domain"
 
-	"flamingo.me/flamingo-commerce/v3/cart/application"
+	"flamingo.me/flamingo/v3/framework/flamingo"
 	"flamingo.me/flamingo/v3/framework/web"
+
+	"flamingo.me/flamingo-commerce/v3/cart/application"
+	cartDomain "flamingo.me/flamingo-commerce/v3/cart/domain/cart"
+	"flamingo.me/flamingo-commerce/v3/cart/interfaces"
+	"flamingo.me/flamingo-commerce/v3/cart/interfaces/controller/forms"
+	"flamingo.me/flamingo-commerce/v3/cart/interfaces/graphql/dto"
+	productDomain "flamingo.me/flamingo-commerce/v3/product/domain"
 )
 
 // CommerceCartMutationResolver resolves cart mutations
@@ -21,39 +26,90 @@ type CommerceCartMutationResolver struct {
 	q                            *CommerceCartQueryResolver
 	cartService                  *application.CartService
 	cartReceiverService          *application.CartReceiverService
-	billingAddressFormController *cartForms.BillingAddressFormController
-	deliveryFormController       *cartForms.DeliveryFormController
-	simplePaymentFormController  *cartForms.SimplePaymentFormController
+	billingAddressFormController *forms.BillingAddressFormController
+	personalDataFormController   *forms.PersonalDataFormController
+	deliveryFormController       *forms.DeliveryFormController
+	simplePaymentFormController  *forms.SimplePaymentFormController
 	formDataEncoderFactory       formApplication.FormDataEncoderFactory
+	logger                       flamingo.Logger
+}
+
+var (
+	ErrFormData             = errors.New("unexpected form data")
+	ErrFormEncode           = errors.New("failed to encode form")
+	ErrPersonalDataFormData = errors.New("failed to submit personal data")
+)
+
+// preserveKnownCartStateError keeps errors that clients handle by message and hides all others.
+func (r *CommerceCartMutationResolver) preserveKnownCartStateError(err error, logMessage string) error {
+	var restrictionErr *application.RestrictionError
+	if errors.As(err, &restrictionErr) ||
+		errors.Is(err, cartDomain.ErrItemNotFound) ||
+		errors.Is(err, cartDomain.ErrDeliveryCodeNotFound) {
+		return err
+	}
+
+	r.logger.Error(logMessage, err)
+
+	return interfaces.ErrCartGeneral
 }
 
 // Inject dependencies
 func (r *CommerceCartMutationResolver) Inject(q *CommerceCartQueryResolver,
-	billingAddressFormController *cartForms.BillingAddressFormController,
-	deliveryFormController *cartForms.DeliveryFormController,
+	billingAddressFormController *forms.BillingAddressFormController,
+	deliveryFormController *forms.DeliveryFormController,
 	formDataEncoderFactory formApplication.FormDataEncoderFactory,
-	simplePaymentFormController *cartForms.SimplePaymentFormController,
+	personalDataFormController *forms.PersonalDataFormController,
+	simplePaymentFormController *forms.SimplePaymentFormController,
 	cartService *application.CartService,
-	cartReceiverService *application.CartReceiverService) *CommerceCartMutationResolver {
+	cartReceiverService *application.CartReceiverService,
+	logger flamingo.Logger,
+) *CommerceCartMutationResolver {
 	r.q = q
 	r.billingAddressFormController = billingAddressFormController
 	r.deliveryFormController = deliveryFormController
 	r.formDataEncoderFactory = formDataEncoderFactory
 	r.simplePaymentFormController = simplePaymentFormController
+	r.personalDataFormController = personalDataFormController
 	r.cartService = cartService
 	r.cartReceiverService = cartReceiverService
+	r.logger = logger.WithField(flamingo.LogKeyModule, "cart").WithField(flamingo.LogKeyCategory, "graphql")
 	return r
 }
 
 // CommerceAddToCart mutation for adding products to the current users cart
-func (r *CommerceCartMutationResolver) CommerceAddToCart(ctx context.Context, marketplaceCode string, qty int, deliveryCode string) (*dto.DecoratedCart, error) {
+func (r *CommerceCartMutationResolver) CommerceAddToCart(ctx context.Context, graphqlAddRequest dto.AddToCart) (*dto.DecoratedCart, error) {
 	req := web.RequestFromContext(ctx)
 
-	addRequest := r.cartService.BuildAddRequest(ctx, marketplaceCode, "", qty, nil)
+	if graphqlAddRequest.Qty < 0 {
+		graphqlAddRequest.Qty = 0
+	}
 
-	_, err := r.cartService.AddProduct(ctx, req.Session(), deliveryCode, addRequest)
+	addRequest := cartDomain.AddRequest{
+		MarketplaceCode:        graphqlAddRequest.MarketplaceCode,
+		Qty:                    graphqlAddRequest.Qty,
+		VariantMarketplaceCode: graphqlAddRequest.VariantMarketplaceCode,
+		AdditionalData:         nil,
+		BundleConfiguration:    dto.MapBundleConfigToDomain(graphqlAddRequest.BundleConfiguration),
+	}
+
+	_, err := r.cartService.AddProduct(ctx, req.Session(), graphqlAddRequest.DeliveryCode, addRequest)
 	if err != nil {
-		return nil, err
+		// Keep existing external error contract for known user-facing product/cart validation errors.
+		// Some integration tests (and potentially clients) rely on those error messages.
+		if errors.Is(err, productDomain.ErrRequiredChoicesAreNotSelected) ||
+			errors.Is(err, productDomain.ErrMarketplaceCodeDoNotExists) ||
+			errors.Is(err, productDomain.ErrSelectedQuantityOutOfRange) ||
+			strings.Contains(err.Error(), productDomain.ErrRequiredChoicesAreNotSelected.Error()) ||
+			strings.Contains(err.Error(), productDomain.ErrMarketplaceCodeDoNotExists.Error()) ||
+			strings.Contains(err.Error(), productDomain.ErrSelectedQuantityOutOfRange.Error()) ||
+			strings.Contains(err.Error(), "No Variant with code ") {
+			return nil, fmt.Errorf("%w", err)
+		}
+
+		r.logger.Error("Failed to add product to cart", err)
+
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	return r.q.CommerceCart(ctx)
@@ -66,7 +122,7 @@ func (r *CommerceCartMutationResolver) CommerceDeleteItem(ctx context.Context, i
 	err := r.cartService.DeleteItem(ctx, req.Session(), itemID, deliveryCode)
 
 	if err != nil {
-		return nil, err
+		return nil, r.preserveKnownCartStateError(err, "Failed to delete cart item")
 	}
 
 	return r.q.CommerceCart(ctx)
@@ -77,7 +133,7 @@ func (r *CommerceCartMutationResolver) CommerceDeleteCartDelivery(ctx context.Co
 	req := web.RequestFromContext(ctx)
 	_, err := r.cartService.DeleteDelivery(ctx, req.Session(), deliveryCode)
 	if err != nil {
-		return nil, err
+		return nil, r.preserveKnownCartStateError(err, "Failed to delete cart delivery")
 	}
 	return r.q.CommerceCart(ctx)
 }
@@ -87,29 +143,88 @@ func (r *CommerceCartMutationResolver) CommerceUpdateItemQty(ctx context.Context
 	req := web.RequestFromContext(ctx)
 	err := r.cartService.UpdateItemQty(ctx, req.Session(), itemID, deliveryCode, qty)
 	if err != nil {
-		return nil, err
+		return nil, r.preserveKnownCartStateError(err, "Failed to update cart item qty")
 	}
 	return r.q.CommerceCart(ctx)
 }
 
-//CommerceCartUpdateBillingAddress resolver method
-func (r *CommerceCartMutationResolver) CommerceCartUpdateBillingAddress(ctx context.Context, address *cartForms.AddressForm) (*dto.BillingAddressForm, error) {
+// CommerceUpdateItemBundleConfig mutation for updating item quantity
+func (r *CommerceCartMutationResolver) CommerceUpdateItemBundleConfig(ctx context.Context, itemID string, bundleConfig []*dto.ChoiceConfiguration) (*dto.DecoratedCart, error) {
+	req := web.RequestFromContext(ctx)
+
+	var bundleConfigDto []dto.ChoiceConfiguration
+
+	for _, config := range bundleConfig {
+		bundleConfigDto = append(bundleConfigDto, *config)
+	}
+
+	bundleConfigDomain := dto.MapBundleConfigToDomain(bundleConfigDto)
+
+	updateCommand := cartDomain.ItemUpdateCommand{
+		ItemID:              itemID,
+		BundleConfiguration: bundleConfigDomain,
+	}
+
+	err := r.cartService.UpdateItemBundleConfig(ctx, req.Session(), updateCommand)
+	if err != nil {
+		// Keep existing external error contract for known user-facing product/cart validation errors.
+		// Some integration tests (and potentially clients) rely on those error messages.
+		if errors.Is(err, productDomain.ErrRequiredChoicesAreNotSelected) ||
+			errors.Is(err, productDomain.ErrMarketplaceCodeDoNotExists) ||
+			errors.Is(err, productDomain.ErrSelectedQuantityOutOfRange) ||
+			strings.Contains(err.Error(), productDomain.ErrRequiredChoicesAreNotSelected.Error()) ||
+			strings.Contains(err.Error(), productDomain.ErrMarketplaceCodeDoNotExists.Error()) ||
+			strings.Contains(err.Error(), productDomain.ErrSelectedQuantityOutOfRange.Error()) ||
+			strings.Contains(err.Error(), "No Variant with code ") {
+			return nil, fmt.Errorf("%w", err)
+		}
+
+		r.logger.Error("Failed to update cart item bundle configuration", err)
+
+		return nil, interfaces.ErrCartGeneral
+	}
+
+	return r.q.CommerceCart(ctx)
+}
+
+// CommerceCartUpdateBillingAddress resolver method
+func (r *CommerceCartMutationResolver) CommerceCartUpdateBillingAddress(ctx context.Context, address *forms.AddressForm) (*dto.BillingAddressForm, error) {
 	newRequest := web.CreateRequest(web.RequestFromContext(ctx).Request(), web.SessionFromContext(ctx))
 	v, err := r.formDataEncoderFactory.CreateByNamedEncoder("commerce.cart.billingFormService").Encode(ctx, address)
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to encode billing address form", err)
+		return nil, ErrFormEncode
 	}
 	newRequest.Request().Form = v
 
 	form, success, err := r.billingAddressFormController.HandleFormAction(ctx, newRequest)
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to submit billing address form", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 	return mapCommerceBillingAddressForm(form, success)
-
 }
 
-//CommerceCartUpdateSelectedPayment resolver method
+// CommerceCartUpdatePersonalData resolver method
+func (r *CommerceCartMutationResolver) CommerceCartUpdatePersonalData(ctx context.Context, personalDataForm *forms.DefaultPersonalDataForm) (*dto.PersonalDataForm, error) {
+	newRequest := web.CreateRequest(web.RequestFromContext(ctx).Request(), web.SessionFromContext(ctx))
+
+	v, err := r.formDataEncoderFactory.CreateByNamedEncoder("commerce.cart.personalDataFormService").Encode(ctx, personalDataForm)
+	if err != nil {
+		return nil, ErrFormEncode
+	}
+
+	newRequest.Request().Form = v
+
+	form, success, err := r.personalDataFormController.HandleFormAction(ctx, newRequest)
+	if err != nil {
+		return nil, ErrPersonalDataFormData
+	}
+
+	return mapCommercePersonalDataForm(form, success)
+}
+
+// CommerceCartUpdateSelectedPayment resolver method
 func (r *CommerceCartMutationResolver) CommerceCartUpdateSelectedPayment(ctx context.Context, gateway string, method string) (*dto.SelectedPaymentResult, error) {
 	newRequest := web.CreateRequest(web.RequestFromContext(ctx).Request(), web.SessionFromContext(ctx))
 	urlValues := make(url.Values)
@@ -119,7 +234,8 @@ func (r *CommerceCartMutationResolver) CommerceCartUpdateSelectedPayment(ctx con
 
 	form, success, err := r.simplePaymentFormController.HandleFormAction(ctx, newRequest)
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to submit simple payment form", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	return &dto.SelectedPaymentResult{
@@ -139,7 +255,8 @@ func (r *CommerceCartMutationResolver) CommerceCartApplyCouponCodeOrGiftCard(ctx
 	_, err := r.cartService.ApplyAny(ctx, req.Session(), code)
 
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to apply coupon code or gift card", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	return r.q.CommerceCart(ctx)
@@ -152,7 +269,8 @@ func (r *CommerceCartMutationResolver) CommerceCartRemoveCouponCode(ctx context.
 	_, err := r.cartService.RemoveVoucher(ctx, req.Session(), couponCode)
 
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to remove coupon code", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	return r.q.CommerceCart(ctx)
@@ -165,7 +283,8 @@ func (r *CommerceCartMutationResolver) CommerceCartRemoveGiftCard(ctx context.Co
 	_, err := r.cartService.RemoveGiftCard(ctx, req.Session(), giftCardCode)
 
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to remove gift card", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	return r.q.CommerceCart(ctx)
@@ -178,18 +297,26 @@ func (r *CommerceCartMutationResolver) CommerceCartUpdateDeliveryAddresses(ctx c
 	for _, deliveryForm := range deliveryForms {
 		encodedForm, err := r.formDataEncoderFactory.CreateByNamedEncoder("commerce.cart.billingFormService").Encode(ctx, deliveryForm)
 		if err != nil {
-			return nil, err
+			r.logger.Error("Failed to encode delivery address form", err)
+			return nil, ErrFormEncode
 		}
 		request.Request().Form = encodedForm
 		request.Params["deliveryCode"] = deliveryForm.LocationCode
 		form, success, err := r.deliveryFormController.HandleFormAction(ctx, request)
 		if err != nil {
-			return nil, err
+			r.logger.Error("Failed to submit delivery address form", err)
+			return nil, interfaces.ErrCartGeneral
 		}
 
 		deliveryAddressForm, err := mapCommerceDeliveryAddressForm(form, success)
 		if err != nil {
-			return nil, err
+			if errors.Is(err, ErrFormData) {
+				return nil, ErrFormData
+			}
+
+			r.logger.Error("Failed to map delivery address form", err)
+
+			return nil, interfaces.ErrCartGeneral
 		}
 
 		result = append(result, &deliveryAddressForm)
@@ -203,7 +330,8 @@ func (r *CommerceCartMutationResolver) CommerceCartUpdateDeliveryShippingOptions
 	session := web.SessionFromContext(ctx)
 	cart, err := r.cartReceiverService.ViewCart(ctx, session)
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to view cart for updating shipping options", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	for _, shippingOption := range shippingOptions {
@@ -218,7 +346,8 @@ func (r *CommerceCartMutationResolver) CommerceCartUpdateDeliveryShippingOptions
 
 		err = r.cartService.UpdateDeliveryInfo(ctx, session, shippingOption.DeliveryCode, cartDomain.CreateDeliveryInfoUpdateCommand(deliveryInfo))
 		if err != nil {
-			return nil, err
+			r.logger.Error("Failed to update delivery info", err)
+			return nil, interfaces.ErrCartGeneral
 		}
 	}
 
@@ -229,7 +358,8 @@ func (r *CommerceCartMutationResolver) CommerceCartUpdateDeliveryShippingOptions
 func (r *CommerceCartMutationResolver) CartClean(ctx context.Context) (bool, error) {
 	err := r.cartService.Clean(ctx, web.SessionFromContext(ctx))
 	if err != nil {
-		return false, err
+		r.logger.Error("Failed to clean cart", err)
+		return false, interfaces.ErrCartGeneral
 	}
 
 	return true, nil
@@ -245,7 +375,8 @@ func (r *CommerceCartMutationResolver) UpdateAdditionalData(ctx context.Context,
 
 	_, err := r.cartService.UpdateAdditionalData(ctx, session, additionalDataMap)
 	if err != nil {
-		return nil, err
+		r.logger.Error("Failed to update cart additional data", err)
+		return nil, interfaces.ErrCartGeneral
 	}
 
 	return r.q.CommerceCart(ctx)
@@ -262,7 +393,8 @@ func (r *CommerceCartMutationResolver) UpdateDeliveriesAdditionalData(ctx contex
 
 		_, err := r.cartService.UpdateDeliveryAdditionalData(ctx, session, additionalData.DeliveryCode, additionalDataMap)
 		if err != nil {
-			return nil, err
+			r.logger.Error("Failed to update delivery additional data", err)
+			return nil, interfaces.ErrCartGeneral
 		}
 	}
 
@@ -270,9 +402,9 @@ func (r *CommerceCartMutationResolver) UpdateDeliveriesAdditionalData(ctx contex
 }
 
 func mapCommerceDeliveryAddressForm(form *domain.Form, success bool) (dto.DeliveryAddressForm, error) {
-	formData, ok := form.Data.(cartForms.DeliveryForm)
+	formData, ok := form.Data.(forms.DeliveryForm)
 	if !ok {
-		return dto.DeliveryAddressForm{}, errors.New("unexpected form data")
+		return dto.DeliveryAddressForm{}, ErrFormData
 	}
 
 	return dto.DeliveryAddressForm{
@@ -292,14 +424,32 @@ func mapCommerceDeliveryAddressForm(form *domain.Form, success bool) (dto.Delive
 
 // mapCommerceBillingAddressForm helper to map the graphql type Commerce_Cart_BillingAddressForm from common form
 func mapCommerceBillingAddressForm(form *domain.Form, success bool) (*dto.BillingAddressForm, error) {
-	billingFormData, ok := form.Data.(cartForms.BillingAddressForm)
+	billingFormData, ok := form.Data.(forms.BillingAddressForm)
 	if !ok {
-		return nil, errors.New("unexpected form data")
+		return nil, ErrFormData
 	}
 
 	return &dto.BillingAddressForm{
 		FormData:  forms.AddressForm(billingFormData),
 		Processed: success,
+		ValidationInfo: dto.ValidationInfo{
+			GeneralErrors: form.ValidationInfo.GetGeneralErrors(),
+			FieldErrors:   mapFieldErrors(form.ValidationInfo),
+		},
+	}, nil
+}
+
+// mapCommerceBillingAddressForm helper to map the graphql type Commerce_Cart_PersonalDataForm from common form
+func mapCommercePersonalDataForm(form *domain.Form, success bool) (*dto.PersonalDataForm, error) {
+	personalDataFormData, ok := form.Data.(*forms.DefaultPersonalDataForm)
+
+	if !ok {
+		return nil, ErrFormData
+	}
+
+	return &dto.PersonalDataForm{
+		PersonalData: *personalDataFormData,
+		Processed:    success,
 		ValidationInfo: dto.ValidationInfo{
 			GeneralErrors: form.ValidationInfo.GetGeneralErrors(),
 			FieldErrors:   mapFieldErrors(form.ValidationInfo),

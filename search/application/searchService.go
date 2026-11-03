@@ -10,10 +10,11 @@ import (
 	"fmt"
 	"net/url"
 
-	"flamingo.me/flamingo-commerce/v3/search/domain"
-	"flamingo.me/flamingo-commerce/v3/search/utils"
 	"flamingo.me/flamingo/v3/framework/flamingo"
 	"flamingo.me/flamingo/v3/framework/web"
+
+	"flamingo.me/flamingo-commerce/v3/search/domain"
+	"flamingo.me/flamingo-commerce/v3/search/utils"
 )
 
 type (
@@ -43,10 +44,11 @@ type (
 		Facets         domain.FacetCollection
 		Suggestions    []domain.Suggestion
 		PaginationInfo utils.PaginationInfo
+		Actions        []domain.Action
 	}
 )
 
-//Inject dependencies
+// Inject dependencies
 func (s *SearchService) Inject(
 	paginationInfoFactory *utils.PaginationInfoFactory,
 	logger flamingo.Logger,
@@ -55,9 +57,7 @@ func (s *SearchService) Inject(
 		DefaultPageSize float64              `inject:"config:commerce.pagination.defaultPageSize,optional"`
 	}) *SearchService {
 	s.paginationInfoFactory = paginationInfoFactory
-	s.logger = logger.
-		WithField(flamingo.LogKeyModule, "search").
-		WithField(flamingo.LogKeyCategory, "application.ProductSearchService")
+	s.logger = logger
 	if optionals != nil {
 		s.searchService = optionals.SearchService
 		s.defaultPageSize = optionals.DefaultPageSize
@@ -68,7 +68,7 @@ func (s *SearchService) Inject(
 // FindBy returns a SearchResult for the given Request
 func (s *SearchService) FindBy(ctx context.Context, documentType string, searchRequest SearchRequest) (*SearchResult, error) {
 	if s.searchService == nil {
-		return nil, errors.New("No searchservice available")
+		return nil, errors.New("no searchservice available")
 	}
 	var currentURL *url.URL
 	request := web.RequestFromContext(ctx)
@@ -98,7 +98,10 @@ func (s *SearchService) FindBy(ctx context.Context, documentType string, searchR
 	if pageSize != 0 {
 		if err := result.SearchMeta.ValidatePageSize(pageSize); err != nil {
 			err = fmt.Errorf("the Searchservice seems to ignore pageSize filter, %w", err)
-			s.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "FindBy").Warn(err)
+			s.logger.
+				WithField(flamingo.LogKeyModule, "search").
+				WithField(flamingo.LogKeyCategory, "application.ProductSearchService").
+				WithContext(ctx).WithField(flamingo.LogKeySubCategory, "FindBy").Warn(err)
 		}
 	}
 
@@ -121,7 +124,7 @@ func (s *SearchService) FindBy(ctx context.Context, documentType string, searchR
 // Find returns a Searchresult for all document types for the given Request
 func (s *SearchService) Find(ctx context.Context, searchRequest SearchRequest) (map[string]*SearchResult, error) {
 	if s.searchService == nil {
-		return nil, errors.New("No searchservice available")
+		return nil, errors.New("no searchservice available")
 	}
 	var currentURL *url.URL
 	request := web.RequestFromContext(ctx)
@@ -152,7 +155,10 @@ func (s *SearchService) Find(ctx context.Context, searchRequest SearchRequest) (
 		for k, r := range result {
 			if err := r.SearchMeta.ValidatePageSize(pageSize); err != nil {
 				err = fmt.Errorf("the Searchservice seems to ignore pageSize filter for document type %q, %w", k, err)
-				s.logger.WithContext(ctx).WithField(flamingo.LogKeySubCategory, "Find").Warn(err)
+				s.logger.
+					WithField(flamingo.LogKeyModule, "search").
+					WithField(flamingo.LogKeyCategory, "application.ProductSearchService").
+					WithContext(ctx).WithField(flamingo.LogKeySubCategory, "Find").Warn(err)
 			}
 		}
 	}
@@ -173,6 +179,7 @@ func (s *SearchService) Find(ctx context.Context, searchRequest SearchRequest) (
 			Suggestions:    r.Suggestion,
 			Hits:           r.Hits,
 			PaginationInfo: paginationInfo,
+			Actions:        r.Actions,
 		}
 	}
 
@@ -200,9 +207,7 @@ func BuildFilters(request SearchRequest, defaultPageSize int) []domain.Filter {
 		filters = append(filters, domain.NewSortFilter(request.SortBy, request.SortDirection))
 	}
 
-	for _, additionalFilter := range request.AdditionalFilter {
-		filters = append(filters, additionalFilter)
-	}
+	filters = append(filters, request.AdditionalFilter...)
 
 	return filters
 }
